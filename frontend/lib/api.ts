@@ -1,6 +1,23 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-export type ApiError = { error: string };
+/** Backend often sends Zod `flatten()` objects under `error`, not plain strings */
+function messageFromApiError(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object") return "Request failed";
+  const flat = error as { formErrors?: string[]; fieldErrors?: Record<string, string[] | undefined> };
+  const parts: string[] = [];
+  if (Array.isArray(flat.formErrors)) {
+    for (const x of flat.formErrors) if (x) parts.push(x);
+  }
+  if (flat.fieldErrors && typeof flat.fieldErrors === "object") {
+    for (const [key, msgs] of Object.entries(flat.fieldErrors)) {
+      if (Array.isArray(msgs) && msgs.length) parts.push(`${key}: ${msgs.join(", ")}`);
+    }
+  }
+  return parts.length ? parts.join(" · ") : JSON.stringify(error);
+}
+
+export type ApiError = { error: string | Record<string, unknown> };
 
 function getTokens() {
   if (typeof window === "undefined") return { access: null as string | null };
@@ -42,8 +59,9 @@ export async function api<T>(
   }
 
   if (!res.ok) {
-    const err = (await res.json().catch(() => ({}))) as ApiError;
-    throw new Error(err.error ?? res.statusText);
+    const body = (await res.json().catch(() => ({}))) as ApiError;
+    const msg = body.error !== undefined ? messageFromApiError(body.error) : res.statusText;
+    throw new Error(msg);
   }
   return res.json() as Promise<T>;
 }
