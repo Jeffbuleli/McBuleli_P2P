@@ -122,7 +122,6 @@ model User {
   internalTransfersOut InternalTransfer[] @relation("TransferFrom")
   internalTransfersIn  InternalTransfer[] @relation("TransferTo")
   kycSubmissions     KycSubmission[]
-  adminAuditLogs     AdminAuditLog[]
 
   @@index([email])
   @@index([username])
