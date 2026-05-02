@@ -28,6 +28,15 @@ app.use(
 app.use(cookieParser());
 app.use(globalLimiter);
 
+app.get("/", (_req, res) =>
+  res.json({
+    ok: true,
+    service: "mcbuleli-api",
+    health: "/health",
+    api: "/api",
+  }),
+);
+
 app.get("/health", (_req, res) => res.json({ ok: true, service: "mcbuleli-api" }));
 
 app.use("/api/auth", authRoutes);
