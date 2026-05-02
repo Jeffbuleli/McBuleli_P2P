@@ -1,4 +1,12 @@
+import { config } from "dotenv";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { PrismaClient } from "@prisma/client";
+
+config({
+  path: join(dirname(fileURLToPath(import.meta.url)), "..", ".env"),
+  override: true,
+});
 
 const prisma = new PrismaClient();
 

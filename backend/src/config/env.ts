@@ -1,7 +1,12 @@
 import { config } from "dotenv";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { z } from "zod";
 
-config();
+const __envDir = dirname(fileURLToPath(import.meta.url));
+// Toujours charger backend/.env (même si le shell a une autre DATABASE_URL)
+const envFile = join(__envDir, "..", "..", ".env");
+config({ path: envFile, override: true });
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),

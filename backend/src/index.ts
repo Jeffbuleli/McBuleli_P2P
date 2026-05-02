@@ -1,11 +1,12 @@
+// Toujours en premier : charge backend/.env avant tout import qui touche Prisma
+import { env } from "./config/env.js";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import { env } from "./config/env.js";
+import { prisma } from "./lib/prisma.js";
 import { globalLimiter } from "./middlewares/rateLimit.js";
 import { processExpiredTrades } from "./services/p2p.service.js";
-import { prisma } from "./lib/prisma.js";
 
 import authRoutes from "./modules/auth.routes.js";
 import userRoutes from "./modules/user.routes.js";
@@ -58,10 +59,33 @@ ensureSingletons()
       console.info(`McBuleli API listening on :${port}`);
     });
     setInterval(() => {
-      processExpiredTrades().catch(console.error);
+      processExpiredTrades().catch((e: unknown) => {
+        const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "";
+        if (code === "P1001") {
+          console.warn("[p2p] Database unreachable — fix DATABASE_URL or start Postgres; skipping expired trades.");
+          return;
+        }
+        console.error(e);
+      });
     }, 60_000);
   })
   .catch((e) => {
     console.error(e);
+    const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "";
+    if (code === "P2021") {
+      console.error(`
+P2021 = la table n’existe pas dans la base. Applique le schéma Prisma :
+
+  npx prisma migrate deploy
+  # ou en dev :
+  npx prisma migrate dev
+
+(Depuis le dossier backend, avec le bon DATABASE_URL vers McBuleli_P2P.)
+`);
+    } else {
+      console.error(`
+Si "Authentication failed" alors que npm run db:check marche : redémarre le terminal, puis npm run dev depuis backend.
+`);
+    }
     process.exit(1);
   });
