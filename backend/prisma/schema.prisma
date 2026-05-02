@@ -1,0 +1,398 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// Seed: `npm run db:seed`
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum KycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CryptoAsset {
+  USDT
+  BTC
+}
+
+enum FiatCurrency {
+  USD
+  CDF
+  EUR
+}
+
+enum TransactionType {
+  DEPOSIT_FIAT
+  WITHDRAW_FIAT
+  INTERNAL_TRANSFER_OUT
+  INTERNAL_TRANSFER_IN
+  P2P_ESCROW_LOCK
+  P2P_ESCROW_RELEASE
+  P2P_REFUND
+  ADJUSTMENT
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum P2POfferSide {
+  BUY
+  SELL
+}
+
+enum P2POfferStatus {
+  ACTIVE
+  PAUSED
+  FILLED
+  CANCELLED
+}
+
+enum P2PTradeStatus {
+  AWAITING_PAYMENT
+  PAID
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum P2PDisputeStatus {
+  OPEN
+  RESOLVED_BUYER
+  RESOLVED_SELLER
+  CANCELLED
+}
+
+enum PapawTxStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum WalletKind {
+  CRYPTO
+  FIAT
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  emailVerifiedAt DateTime?
+  phone           String?
+  username        String    @unique
+  passwordHash    String
+  fullName        String
+  country         String    @default("CD")
+  kycStatus       KycStatus @default(PENDING)
+  profilePhotoUrl String?
+  p2pRatingAvg    Decimal   @default(0) @db.Decimal(4, 2)
+  completedTrades Int       @default(0)
+  isFrozen        Boolean   @default(false)
+  isBlacklisted   Boolean   @default(false)
+  twoFactorEnabled Boolean  @default(false)
+  /// Encrypted TOTP secret (AES-256-GCM); never store plain
+  twoFactorSecretEnc String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  walletAccounts     WalletAccount[]
+  sessions           Session[]
+  devices            Device[]
+  refreshTokens      RefreshToken[]
+  transactions       Transaction[]
+  ledgerEntries      LedgerEntry[]
+  offers             P2POffer[]
+  tradesAsBuyer      P2PTrade[]        @relation("BuyerTrades")
+  tradesAsSeller     P2PTrade[]        @relation("SellerTrades")
+  tradeMessages      P2PTradeMessage[]
+  ratingsGiven       Rating[]          @relation("RatingsFrom")
+  ratingsReceived    Rating[]          @relation("RatingsTo")
+  disputesOpened     P2PDispute[]      @relation("DisputeOpener")
+  suspiciousFlags    SuspiciousFlag[]
+  fiatDeposits       FiatDeposit[]
+  fiatWithdrawals    FiatWithdrawal[]
+  internalTransfersOut InternalTransfer[] @relation("TransferFrom")
+  internalTransfersIn  InternalTransfer[] @relation("TransferTo")
+  kycSubmissions     KycSubmission[]
+  adminAuditLogs     AdminAuditLog[]
+
+  @@index([email])
+  @@index([username])
+  @@index([country])
+}
+
+model KycSubmission {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentUrl String?
+  notes     String?
+  reviewedAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  deviceLabel  String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Device {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fingerprint String
+  lastIp      String?
+  lastSeenAt  DateTime @default(now())
+  label       String?
+
+  @@unique([userId, fingerprint])
+}
+
+model WalletAccount {
+  id             String      @id @default(uuid()) @db.Uuid
+  userId         String      @db.Uuid
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind           WalletKind
+  /// Currency code: USDT, BTC, CDF, USD, EUR
+  currencyCode   String
+  /// Available balance (custodial ledger)
+  balance        Decimal     @default(0) @db.Decimal(28, 8)
+  /// Locked for P2P escrow / pending ops
+  lockedBalance  Decimal     @default(0) @db.Decimal(28, 8)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  ledgerEntries LedgerEntry[]
+
+  @@unique([userId, kind, currencyCode])
+  @@index([userId])
+}
+
+model LedgerEntry {
+  id            String   @id @default(uuid()) @db.Uuid
+  accountId     String   @db.Uuid
+  account       WalletAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  userId        String   @db.Uuid
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount        Decimal  @db.Decimal(28, 8)
+  balanceAfter  Decimal  @db.Decimal(28, 8)
+  type          String
+  referenceType String
+  referenceId   String
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([referenceType, referenceId])
+}
+
+model Transaction {
+  id          String            @id @default(uuid()) @db.Uuid
+  referenceId String            @unique
+  userId      String            @db.Uuid
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        TransactionType
+  status      TransactionStatus @default(PENDING)
+  amount      Decimal           @db.Decimal(28, 8)
+  currency    String
+  metadata    Json?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([type, status])
+}
+
+model InternalTransfer {
+  id          String   @id @default(uuid()) @db.Uuid
+  referenceId String   @unique
+  fromUserId  String   @db.Uuid
+  toUserId    String   @db.Uuid
+  fromUser    User     @relation("TransferFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser      User     @relation("TransferTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  amount      Decimal  @db.Decimal(28, 8)
+  currency    String
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([fromUserId])
+  @@index([toUserId])
+}
+
+model FiatDeposit {
+  id            String         @id @default(uuid()) @db.Uuid
+  userId        String         @db.Uuid
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount        Decimal        @db.Decimal(28, 8)
+  currency      FiatCurrency
+  externalRef   String?
+  pawapayPayload Json?
+  status        PapawTxStatus @default(PENDING)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([externalRef])
+  @@index([userId])
+}
+
+model FiatWithdrawal {
+  id            String         @id @default(uuid()) @db.Uuid
+  userId        String         @db.Uuid
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount        Decimal        @db.Decimal(28, 8)
+  currency      FiatCurrency
+  destinationMsisdn String?
+  externalRef   String?
+  status        PapawTxStatus @default(PENDING)
+  reviewedBy    String?
+  fraudScore    Int?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([userId])
+}
+
+model P2POffer {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  side            P2POfferSide
+  cryptoAsset     CryptoAsset    @default(USDT)
+  fiatCurrency    FiatCurrency
+  pricePerUnit    Decimal        @db.Decimal(28, 8)
+  minFiat         Decimal        @db.Decimal(28, 8)
+  maxFiat         Decimal        @db.Decimal(28, 8)
+  paymentMethods  Json
+  status          P2POfferStatus @default(ACTIVE)
+  expiresAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  trades P2PTrade[]
+
+  @@index([userId, status])
+  @@index([cryptoAsset, fiatCurrency, status])
+}
+
+model P2PTrade {
+  id             String         @id @default(uuid()) @db.Uuid
+  referenceId    String         @unique
+  offerId        String         @db.Uuid
+  offer          P2POffer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  buyerId        String         @db.Uuid
+  sellerId       String         @db.Uuid
+  buyer          User           @relation("BuyerTrades", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller         User           @relation("SellerTrades", fields: [sellerId], references: [id], onDelete: Cascade)
+  cryptoAmount   Decimal        @db.Decimal(28, 8)
+  fiatAmount     Decimal        @db.Decimal(28, 8)
+  status         P2PTradeStatus @default(AWAITING_PAYMENT)
+  timerEndsAt    DateTime
+  paidAt         DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  messages P2PTradeMessage[]
+  dispute  P2PDispute?
+  rating   Rating?
+
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([status])
+}
+
+model P2PTradeMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  tradeId   String   @db.Uuid
+  trade     P2PTrade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  senderId  String   @db.Uuid
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([tradeId, createdAt])
+}
+
+model P2PDispute {
+  id         String            @id @default(uuid()) @db.Uuid
+  tradeId    String            @unique @db.Uuid
+  trade      P2PTrade          @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  openedById String            @db.Uuid
+  openedBy   User              @relation("DisputeOpener", fields: [openedById], references: [id], onDelete: Cascade)
+  reason     String
+  status     P2PDisputeStatus  @default(OPEN)
+  resolution String?
+  createdAt  DateTime          @default(now())
+  resolvedAt DateTime?
+}
+
+model Rating {
+  id         String   @id @default(uuid()) @db.Uuid
+  tradeId    String   @unique @db.Uuid
+  trade      P2PTrade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  fromUserId String   @db.Uuid
+  toUserId   String   @db.Uuid
+  fromUser   User     @relation("RatingsFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser     User     @relation("RatingsTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  score      Int
+  comment    String?
+  createdAt  DateTime @default(now())
+}
+
+model SuspiciousFlag {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reason    String
+  severity  Int      @default(1)
+  metadata  Json?
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model AdminAuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  adminEmail String
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+}
+
+model SystemConfig {
+  id    String @id @default("singleton")
+  dailyWithdrawLimitFiat Decimal @default(500000) @db.Decimal(28, 8)
+  updatedAt DateTime @updatedAt
+}
