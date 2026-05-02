@@ -1,5 +1,14 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+const FETCH_TIMEOUT_MS = 60_000;
+
+function defaultTimeoutSignal(): AbortSignal | undefined {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  }
+  return undefined;
+}
+
 /** Backend often sends Zod `flatten()` objects under `error`, not plain strings */
 function messageFromApiError(error: unknown): string {
   if (typeof error === "string") return error;
@@ -40,7 +49,11 @@ export async function api<T>(
   if (auth && access) {
     (headers as Record<string, string>)["Authorization"] = `Bearer ${access}`;
   }
-  let res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  let res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+    signal: init?.signal ?? defaultTimeoutSignal(),
+  });
 
   if (res.status === 401 && refresh && path !== "/api/auth/refresh") {
     const r2 = await fetch(`${API_BASE}/api/auth/refresh`, {
@@ -48,13 +61,18 @@ export async function api<T>(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken: refresh }),
       credentials: "omit",
+      signal: init?.signal ?? defaultTimeoutSignal(),
     });
     if (r2.ok) {
       const j = (await r2.json()) as { accessToken: string; refreshToken: string };
       localStorage.setItem("accessToken", j.accessToken);
       localStorage.setItem("refreshToken", j.refreshToken);
       (headers as Record<string, string>)["Authorization"] = `Bearer ${j.accessToken}`;
-      res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+      res = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers,
+        signal: init?.signal ?? defaultTimeoutSignal(),
+      });
     }
   }
 

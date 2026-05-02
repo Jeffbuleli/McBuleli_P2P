@@ -29,7 +29,17 @@ export default function RegisterPage() {
       });
       router.push("/auth/login?registered=1");
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Registration failed");
+      const aborted =
+        (e instanceof Error && e.name === "AbortError") ||
+        (typeof e === "object" &&
+          e !== null &&
+          "name" in e &&
+          String((e as { name: unknown }).name) === "AbortError");
+      if (aborted) {
+        setErr("Request timed out. Check NEXT_PUBLIC_API_URL and that the API is running.");
+      } else {
+        setErr(e instanceof Error ? e.message : "Registration failed");
+      }
     } finally {
       setLoading(false);
     }
@@ -82,7 +92,7 @@ export default function RegisterPage() {
           disabled={loading}
           className="w-full rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {loading ? "…" : "Register"}
+          {loading ? "Creating account…" : "Register"}
         </button>
       </form>
       <p className="mt-6 text-center text-sm text-zinc-500">
