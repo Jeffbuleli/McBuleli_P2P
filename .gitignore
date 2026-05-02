@@ -6,3 +6,13 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Never commit installers / archives (they blew up git push ~470MB)
+*.zip
+*.dmg
+*.app.zip
+
+# Archives (never commit)
+*.zip
+*.dmg
+*.app.zip
