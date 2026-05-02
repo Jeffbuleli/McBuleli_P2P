@@ -25,6 +25,9 @@ app.use(
     credentials: true,
   }),
 );
+// Webhooks first: router uses JSON + raw capture for signature verification
+app.use("/webhooks", createWebhookRouter());
+app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 app.use(globalLimiter);
 
@@ -45,7 +48,6 @@ app.use("/api/wallet", walletRoutes);
 app.use("/api/p2p", p2pRoutes);
 app.use("/api/market", marketRoutes);
 app.use("/api/admin", adminRoutes);
-app.use("/webhooks", createWebhookRouter());
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
