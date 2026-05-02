@@ -13,13 +13,14 @@ import {
 } from "../services/admin.service.js";
 import { listSuspicious } from "../services/risk.service.js";
 import { strictLimiter } from "../middlewares/rateLimit.js";
+import { queryString, routeParam } from "../lib/expressParams.js";
 
 const r = Router();
 
 r.use(requireAuth, requireAdmin);
 
 r.get("/users", async (req, res) => {
-  const q = (req.query.q as string) || "";
+  const q = queryString(req.query.q) || "";
   const users = await prisma.user.findMany({
     where: q
       ? {
@@ -49,7 +50,7 @@ r.post("/users/:id/kyc", strictLimiter, async (req: AuthedRequest, res) => {
   const schema = z.object({ status: z.nativeEnum(KycStatus) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  await setKycStatus(req.params.id, parsed.data.status, req.userEmail!);
+  await setKycStatus(routeParam(req.params.id), parsed.data.status, req.userEmail!);
   return res.json({ ok: true });
 });
 
@@ -57,7 +58,7 @@ r.post("/users/:id/freeze", strictLimiter, async (req: AuthedRequest, res) => {
   const schema = z.object({ frozen: z.boolean() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  await freezeUser(req.params.id, req.userEmail!, parsed.data.frozen);
+  await freezeUser(routeParam(req.params.id), req.userEmail!, parsed.data.frozen);
   return res.json({ ok: true });
 });
 
@@ -82,7 +83,7 @@ r.post("/disputes/:tradeId/resolve", strictLimiter, async (req: AuthedRequest, r
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   try {
-    await resolveDispute(req.params.tradeId, parsed.data.resolution as "RESOLVED_BUYER" | "RESOLVED_SELLER", req.userEmail!);
+    await resolveDispute(routeParam(req.params.tradeId), parsed.data.resolution as "RESOLVED_BUYER" | "RESOLVED_SELLER", req.userEmail!);
     return res.json({ ok: true });
   } catch (e: unknown) {
     return res.status(400).json({ error: e instanceof Error ? e.message : "ERROR" });
@@ -91,7 +92,7 @@ r.post("/disputes/:tradeId/resolve", strictLimiter, async (req: AuthedRequest, r
 
 r.post("/withdrawals/:id/approve", strictLimiter, async (req: AuthedRequest, res) => {
   try {
-    await approveWithdrawal(req.params.id, req.userEmail!);
+    await approveWithdrawal(routeParam(req.params.id), req.userEmail!);
     return res.json({ ok: true });
   } catch (e: unknown) {
     return res.status(400).json({ error: e instanceof Error ? e.message : "ERROR" });
@@ -100,7 +101,7 @@ r.post("/withdrawals/:id/approve", strictLimiter, async (req: AuthedRequest, res
 
 r.post("/withdrawals/:id/reject", strictLimiter, async (req: AuthedRequest, res) => {
   try {
-    await rejectWithdrawal(req.params.id, req.userEmail!);
+    await rejectWithdrawal(routeParam(req.params.id), req.userEmail!);
     return res.json({ ok: true });
   } catch (e: unknown) {
     return res.status(400).json({ error: e instanceof Error ? e.message : "ERROR" });

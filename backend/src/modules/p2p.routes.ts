@@ -16,13 +16,15 @@ import {
 } from "../services/p2p.service.js";
 import { prisma } from "../lib/prisma.js";
 import { strictLimiter } from "../middlewares/rateLimit.js";
+import { queryString, routeParam } from "../lib/expressParams.js";
 
 const r = Router();
 
 r.get("/offers", async (req, res) => {
-  const side = req.query.side as P2POfferSide | undefined;
-  const fiat = req.query.fiat as string | undefined;
-  const crypto = req.query.crypto as string | undefined;
+  const sideRaw = queryString(req.query.side);
+  const side = (sideRaw || undefined) as P2POfferSide | undefined;
+  const fiat = queryString(req.query.fiat) || undefined;
+  const crypto = queryString(req.query.crypto) || undefined;
   const rows = await listOffers({ side, fiat, crypto });
   return res.json(rows);
 });
@@ -63,7 +65,7 @@ r.post("/trades", requireAuth, requireVerifiedEmail, strictLimiter, async (req: 
 r.get("/trades/:id", requireAuth, async (req: AuthedRequest, res) => {
   const t = await prisma.p2PTrade.findFirst({
     where: {
-      id: req.params.id,
+      id: routeParam(req.params.id),
       OR: [{ buyerId: req.userId! }, { sellerId: req.userId! }],
     },
     include: { offer: true, dispute: true },
@@ -74,7 +76,7 @@ r.get("/trades/:id", requireAuth, async (req: AuthedRequest, res) => {
 
 r.post("/trades/:id/paid", requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const t = await markPaid(req.params.id, req.userId!);
+    const t = await markPaid(routeParam(req.params.id), req.userId!);
     return res.json(t);
   } catch (e: unknown) {
     return res.status(400).json({ error: e instanceof Error ? e.message : "ERROR" });
@@ -83,7 +85,7 @@ r.post("/trades/:id/paid", requireAuth, async (req: AuthedRequest, res) => {
 
 r.post("/trades/:id/confirm", requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const t = await confirmRelease(req.params.id, req.userId!);
+    const t = await confirmRelease(routeParam(req.params.id), req.userId!);
     return res.json(t);
   } catch (e: unknown) {
     return res.status(400).json({ error: e instanceof Error ? e.message : "ERROR" });
@@ -92,7 +94,7 @@ r.post("/trades/:id/confirm", requireAuth, async (req: AuthedRequest, res) => {
 
 r.post("/trades/:id/cancel", requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const t = await cancelTrade(req.params.id, req.userId!);
+    const t = await cancelTrade(routeParam(req.params.id), req.userId!);
     return res.json(t);
   } catch (e: unknown) {
     return res.status(400).json({ error: e instanceof Error ? e.message : "ERROR" });
@@ -104,7 +106,7 @@ r.post("/trades/:id/dispute", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   try {
-    const t = await openDispute(req.params.id, req.userId!, parsed.data.reason);
+    const t = await openDispute(routeParam(req.params.id), req.userId!, parsed.data.reason);
     return res.json(t);
   } catch (e: unknown) {
     return res.status(400).json({ error: e instanceof Error ? e.message : "ERROR" });
@@ -114,7 +116,7 @@ r.post("/trades/:id/dispute", requireAuth, async (req: AuthedRequest, res) => {
 r.get("/trades/:id/messages", requireAuth, async (req: AuthedRequest, res) => {
   const trade = await prisma.p2PTrade.findFirst({
     where: {
-      id: req.params.id,
+      id: routeParam(req.params.id),
       OR: [{ buyerId: req.userId! }, { sellerId: req.userId! }],
     },
   });
@@ -129,7 +131,7 @@ r.post("/trades/:id/messages", requireAuth, async (req: AuthedRequest, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const trade = await prisma.p2PTrade.findFirst({
     where: {
-      id: req.params.id,
+      id: routeParam(req.params.id),
       OR: [{ buyerId: req.userId! }, { sellerId: req.userId! }],
     },
   });
@@ -146,7 +148,7 @@ r.post("/trades/:id/rating", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   try {
-    await submitRating(req.params.id, req.userId!, parsed.data.score, parsed.data.comment);
+    await submitRating(routeParam(req.params.id), req.userId!, parsed.data.score, parsed.data.comment);
     return res.json({ ok: true });
   } catch (e: unknown) {
     return res.status(400).json({ error: e instanceof Error ? e.message : "ERROR" });
