@@ -1,10 +1,10 @@
 "use client";
 
+import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState } from "react";
 import { api } from "@/lib/api";
 
-export default function NewTradePage() {
+function NewTradeForm() {
   const sp = useSearchParams();
   const router = useRouter();
   const offerId = sp.get("offer") ?? "";
@@ -49,5 +49,13 @@ export default function NewTradePage() {
         </button>
       </form>
     </div>
+  );
+}
+
+export default function NewTradePage() {
+  return (
+    <Suspense fallback={<p className="text-zinc-500">Loading…</p>}>
+      <NewTradeForm />
+    </Suspense>
   );
 }
