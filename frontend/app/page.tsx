@@ -28,7 +28,7 @@ export default function HomePage() {
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-800 to-primary-950 shadow-card dark:from-brand-950 dark:to-earth-950">
             <Shield className="h-5 w-5 text-brand-400" aria-hidden strokeWidth={2} />
           </div>
-          <span className="bg-gradient-to-r from-primary-900 to-brand-600 bg-clip-text text-lg font-bold tracking-tight text-transparent dark:from-brand-300 dark:to-earth-300">
+          <span className="text-lg font-bold tracking-tight text-brand-600 dark:text-brand-400">
             {t("shell.brand")}
           </span>
         </div>
@@ -43,7 +43,7 @@ export default function HomePage() {
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand-600 dark:text-brand-400/95">
             {t("home.badge")}
           </p>
-          <h1 className="mx-auto mt-4 max-w-md text-balance text-3xl font-bold tracking-tight text-slate-900 dark:bg-gradient-to-br dark:from-white dark:via-zinc-100 dark:to-earth-300/80 dark:bg-clip-text dark:text-transparent md:text-4xl">
+          <h1 className="mx-auto mt-4 max-w-md text-balance text-3xl font-bold tracking-tight text-slate-900 md:text-4xl dark:text-white">
             {t("home.headline")}
           </h1>
           <p className="mx-auto mt-3 max-w-md text-sm font-medium text-brand-700 dark:text-brand-400/95">{t("home.subhead")}</p>
