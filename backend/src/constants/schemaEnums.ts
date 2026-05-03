@@ -14,6 +14,8 @@ export const TransactionType = {
   ADJUSTMENT: "ADJUSTMENT",
   STAKE_LOCK: "STAKE_LOCK",
   STAKE_EXIT: "STAKE_EXIT",
+  DEPOSIT_CRYPTO: "DEPOSIT_CRYPTO",
+  WITHDRAW_CRYPTO: "WITHDRAW_CRYPTO",
 } as const;
 export type TransactionType = (typeof TransactionType)[keyof typeof TransactionType];
 
@@ -57,3 +59,28 @@ export const StakeStatus = {
   COMPLETED: "COMPLETED",
 } as const;
 export type StakeStatus = (typeof StakeStatus)[keyof typeof StakeStatus];
+
+export const ChainNetwork = {
+  TRC20: "TRC20",
+  ERC20: "ERC20",
+  BEP20: "BEP20",
+} as const;
+export type ChainNetwork = (typeof ChainNetwork)[keyof typeof ChainNetwork];
+
+export const CryptoDepositIntentStatus = {
+  AWAITING_TX: "AWAITING_TX",
+  PENDING_VALIDATION: "PENDING_VALIDATION",
+  CONFIRMED: "CONFIRMED",
+  FAILED: "FAILED",
+} as const;
+export type CryptoDepositIntentStatus =
+  (typeof CryptoDepositIntentStatus)[keyof typeof CryptoDepositIntentStatus];
+
+export const CryptoOnchainWithdrawalStatus = {
+  PENDING: "PENDING",
+  PROCESSING: "PROCESSING",
+  SUCCESS: "SUCCESS",
+  FAILED: "FAILED",
+} as const;
+export type CryptoOnchainWithdrawalStatus =
+  (typeof CryptoOnchainWithdrawalStatus)[keyof typeof CryptoOnchainWithdrawalStatus];

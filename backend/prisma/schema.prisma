@@ -37,6 +37,28 @@ enum TransactionType {
   ADJUSTMENT
   STAKE_LOCK
   STAKE_EXIT
+  DEPOSIT_CRYPTO
+  WITHDRAW_CRYPTO
+}
+
+enum ChainNetwork {
+  TRC20
+  ERC20
+  BEP20
+}
+
+enum CryptoDepositIntentStatus {
+  AWAITING_TX
+  PENDING_VALIDATION
+  CONFIRMED
+  FAILED
+}
+
+enum CryptoOnchainWithdrawalStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
 }
 
 enum StakeStatus {
@@ -164,6 +186,8 @@ model User {
   staffRoles         UserStaffRole[] @relation("UserStaffRoles")
   staffRolesAssigned UserStaffRole[] @relation("StaffAssignments")
   notifications    Notification[]
+  cryptoDepositIntents   CryptoDepositIntent[]
+  cryptoOnchainWithdrawals CryptoOnchainWithdrawal[]
 
   @@index([email])
   @@index([username])
@@ -450,6 +474,74 @@ model Notification {
 
   @@index([userId, createdAt])
   @@index([userId, readAt])
+}
+
+/// User-initiated on-chain deposit: address shown only after risk acknowledgement.
+model CryptoDepositIntent {
+  id                      String                   @id @default(uuid()) @db.Uuid
+  userId                  String                   @db.Uuid
+  user                    User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset                   CryptoAsset
+  network                 ChainNetwork
+  /// Custodial deposit address (must match chain explorer validation).
+  platformAddress         String
+  memoTag                 String?
+  minAmount               Decimal                  @db.Decimal(28, 8)
+  /// Service fee (USDT) snapshot at creation; on-chain gross must cover minAmount + this fee.
+  serviceFeeUsdt          Decimal                  @default(2) @db.Decimal(28, 8)
+  confirmationsRequired   Int                      @default(12)
+  status                  CryptoDepositIntentStatus @default(AWAITING_TX)
+  riskWarningAcceptedAt   DateTime
+  userMarkedSentAt        DateTime?
+  txid                    String?
+  amountCredited          Decimal?                 @db.Decimal(28, 8)
+  failureReason           String?
+  explorerValidationJson  Json?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  onchainTxidRecord       UsedOnchainTxid?
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+}
+
+/// Global uniqueness for TXIDs per network (prevents double-spend across users).
+model UsedOnchainTxid {
+  id                String                 @id @default(uuid()) @db.Uuid
+  network           ChainNetwork
+  txid              String
+  depositIntentId   String?                @unique @db.Uuid
+  depositIntent     CryptoDepositIntent?   @relation(fields: [depositIntentId], references: [id], onDelete: SetNull)
+  withdrawalId      String?                @unique @db.Uuid
+  withdrawal        CryptoOnchainWithdrawal? @relation(fields: [withdrawalId], references: [id], onDelete: SetNull)
+  createdAt         DateTime               @default(now())
+
+  @@unique([network, txid])
+  @@index([txid])
+}
+
+model CryptoOnchainWithdrawal {
+  id            String                       @id @default(uuid()) @db.Uuid
+  referenceId   String                       @unique
+  userId        String                       @db.Uuid
+  user          User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset         CryptoAsset
+  network       ChainNetwork
+  toAddress     String
+  /// Net amount sent on-chain to the user’s external address.
+  amount        Decimal                      @db.Decimal(28, 8)
+  /// Platform fee (USDT); total locked from user = amount + feeAmount.
+  feeAmount     Decimal                      @db.Decimal(28, 8)
+  status        CryptoOnchainWithdrawalStatus  @default(PENDING)
+  cexOrderId    String?
+  txid          String?
+  failureReason String?
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
+  onchainTxidRecord UsedOnchainTxid?
+
+  @@index([userId, status])
+  @@index([status, createdAt])
 }
 
 model SuspiciousFlag {

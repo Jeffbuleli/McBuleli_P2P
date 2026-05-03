@@ -30,6 +30,8 @@ const schema = z.object({
   ADMIN_EMAILS: z.string().optional(),
   /** User id (UUID) that receives staking interest fees as ADJUSTMENT credits; optional. */
   PLATFORM_STAKING_FEES_USER_ID: z.string().uuid().optional(),
+  /** User id (UUID) that receives USDT crypto deposit/withdraw service fees; defaults to PLATFORM_STAKING_FEES_USER_ID. */
+  PLATFORM_CRYPTO_FEES_USER_ID: z.string().uuid().optional(),
   PAWAPAY_API_KEY: z.string().optional(),
   PAWAPAY_WEBHOOK_SECRET: z.string().optional(),
   /** Démo / intégration : toujours sandbox. Prod uniquement : https://api.pawapay.io */
@@ -48,6 +50,40 @@ const schema = z.object({
   PAWAPAY_PAYOUT_COUNTRY: z.string().length(3).optional(),
   BINANCE_API_KEY: z.string().optional(),
   BINANCE_API_SECRET: z.string().optional(),
+
+  /** TronGrid / fullnode (TRC20) */
+  TRON_PRO_API_KEY: z.string().optional(),
+  /** Optional custom Tron fullnode; default public TronGrid */
+  TRON_FULLNODE_URL: z.string().url().optional(),
+
+  /** EVM JSON-RPC (ERC20) — if unset, public endpoint used for validation only (not for broadcast) */
+  ETH_MAINNET_RPC_URL: z.string().url().optional(),
+  BSC_MAINNET_RPC_URL: z.string().url().optional(),
+
+  /** Etherscan family API keys (optional; improves rate limits) */
+  ETHERSCAN_API_KEY: z.string().optional(),
+  BSCSCAN_API_KEY: z.string().optional(),
+
+  /**
+   * Custodial deposit addresses (USDT) per network. Must match explorer validation.
+   * Set in production; missing value blocks that network.
+   */
+  CRYPTO_DEPOSIT_USDT_TRC20_ADDRESS: z.string().optional(),
+  CRYPTO_DEPOSIT_USDT_ERC20_ADDRESS: z.string().optional(),
+  CRYPTO_DEPOSIT_USDT_BEP20_ADDRESS: z.string().optional(),
+
+  /** Fixed USDT fee per crypto deposit and per crypto withdrawal (default 2). */
+  CRYPTO_SERVICE_FEE_USDT: z.string().default("2"),
+
+  /**
+   * If true, on-chain withdrawals move to SUCCESS with a placeholder txid when no CEX/chain broadcast is configured.
+   * Never enable in production unless you process payouts out-of-band.
+   */
+  CRYPTO_WITHDRAW_CEX_MOCK: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
+
   /** Origines autorisées (virgule). Inclure localhost ET 127.0.0.1 si tu ouvres le front des deux façons. */
   CORS_ORIGIN: z
     .string()

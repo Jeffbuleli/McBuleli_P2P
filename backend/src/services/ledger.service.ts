@@ -171,6 +171,14 @@ async function lockWalletRow(
   return rows[0] ?? null;
 }
 
+type LockToEscrowOptions = {
+  ledgerType?: string;
+  transactionType?: TransactionType;
+  transactionStatus?: TransactionStatus;
+  /** Overrides generated TX reference id (e.g. link pending withdrawal to CryptoOnchainWithdrawal.referenceId) */
+  transactionReferenceId?: string;
+};
+
 export async function moveToLockedTx(
   db: Prisma.TransactionClient,
   userId: string,
@@ -179,12 +187,18 @@ export async function moveToLockedTx(
   amount: Decimal,
   referenceType: string,
   referenceId: string,
+  lockOptions?: LockToEscrowOptions,
 ): Promise<void> {
   const account = await lockWalletRow(db, userId, kind, currencyCode);
   if (!account || account.balance.lessThan(amount)) throw new InsufficientFundsError();
 
   const balanceNext = account.balance.sub(amount);
   const lockedNext = account.lockedBalance.add(amount);
+
+  const ledgerType = lockOptions?.ledgerType ?? "LOCK_ESCROW";
+  const txType = lockOptions?.transactionType ?? "P2P_ESCROW_LOCK";
+  const txStatus = lockOptions?.transactionStatus ?? "SUCCESS";
+  const txRef = lockOptions?.transactionReferenceId ?? newReference("TX");
 
   await db.walletAccount.update({
     where: { id: account.id },
@@ -199,23 +213,69 @@ export async function moveToLockedTx(
       userId,
       amount: amount.neg(),
       balanceAfter: balanceNext,
-      type: "LOCK_ESCROW",
+      type: ledgerType,
       referenceType,
       referenceId,
     },
   });
   await db.transaction.create({
     data: {
-      referenceId: newReference("TX"),
+      referenceId: txRef,
       userId,
-      type: "P2P_ESCROW_LOCK",
-      status: "SUCCESS",
+      type: txType,
+      status: txStatus,
       amount: amount.abs(),
       currency: currencyCode,
       metadata: {
-        ledgerType: "LOCK_ESCROW",
+        ledgerType,
         referenceType,
         referenceId,
+      } as Prisma.InputJsonValue,
+    },
+  });
+}
+
+/**
+ * Finalize a crypto on-chain withdrawal after payout is confirmed: burns locked funds (no return to available balance).
+ */
+export async function finalizeLockedWithdrawalTx(
+  db: Prisma.TransactionClient,
+  userId: string,
+  kind: WalletKind,
+  currencyCode: string,
+  amount: Decimal,
+  referenceType: string,
+  referenceId: string,
+  transactionReferenceId: string,
+): Promise<void> {
+  const account = await lockWalletRow(db, userId, kind, currencyCode);
+  if (!account || account.lockedBalance.lessThan(amount)) throw new Error("LOCK_MISMATCH");
+  const lockedNext = account.lockedBalance.sub(amount);
+  await db.walletAccount.update({
+    where: { id: account.id },
+    data: { lockedBalance: lockedNext },
+  });
+  await db.ledgerEntry.create({
+    data: {
+      accountId: account.id,
+      userId,
+      amount: new Decimal(0),
+      balanceAfter: account.balance,
+      type: "CRYPTO_WITHDRAW_FINALIZE",
+      referenceType,
+      referenceId,
+      metadata: { settledFromLocked: amount.toString() } as Prisma.InputJsonValue,
+    },
+  });
+  await db.transaction.updateMany({
+    where: { referenceId: transactionReferenceId, userId },
+    data: {
+      status: "SUCCESS",
+      metadata: {
+        ledgerType: "CRYPTO_WITHDRAW_FINALIZE",
+        referenceType,
+        referenceId,
+        settledFromLocked: amount.toString(),
       } as Prisma.InputJsonValue,
     },
   });

@@ -67,25 +67,35 @@ export default function WalletPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{t("wallet.title")}</h1>
-        <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Link
             href="/app/payment"
             className="flex flex-col items-center gap-1.5 rounded-2xl border border-slate-200 bg-white py-3 text-center text-xs font-semibold text-slate-800 shadow-sm dark:border-white/10 dark:bg-surface-secondary/80 dark:text-zinc-100"
           >
             <ArrowDownCircle className="h-6 w-6 text-brand-500" aria-hidden />
-            {t("dashboard.deposit")}
+            {t("wallet.quickMoMoDeposit")}
           </Link>
           <Link
-            href="/app/wallet"
+            href="/app/wallet/crypto/deposit"
             className="flex flex-col items-center gap-1.5 rounded-2xl border border-slate-200 bg-white py-3 text-center text-xs font-semibold text-slate-800 shadow-sm dark:border-white/10 dark:bg-surface-secondary/80 dark:text-zinc-100"
           >
-            <ArrowUpCircle className="h-6 w-6 text-brand-500" aria-hidden />
-            {t("dashboard.withdraw")}
+            <ArrowDownCircle className="h-6 w-6 text-emerald-500" aria-hidden />
+            {t("wallet.quickCryptoDeposit")}
           </Link>
-          <span className="flex flex-col items-center gap-1.5 rounded-2xl border border-dashed border-slate-200 py-3 text-center text-xs font-semibold text-slate-400 dark:border-white/10 dark:text-zinc-500">
-            <Send className="h-6 w-6 opacity-60" aria-hidden />
+          <Link
+            href="/app/wallet/crypto/withdraw"
+            className="flex flex-col items-center gap-1.5 rounded-2xl border border-slate-200 bg-white py-3 text-center text-xs font-semibold text-slate-800 shadow-sm dark:border-white/10 dark:bg-surface-secondary/80 dark:text-zinc-100"
+          >
+            <ArrowUpCircle className="h-6 w-6 text-amber-500" aria-hidden />
+            {t("wallet.quickCryptoWithdraw")}
+          </Link>
+          <Link
+            href="#wallet-internal-transfer"
+            className="flex flex-col items-center gap-1.5 rounded-2xl border border-slate-200 bg-white py-3 text-center text-xs font-semibold text-slate-800 shadow-sm dark:border-white/10 dark:bg-surface-secondary/80 dark:text-zinc-100"
+          >
+            <Send className="h-6 w-6 text-brand-500" aria-hidden />
             {t("dashboard.send")}
-          </span>
+          </Link>
         </div>
       </div>
 
@@ -108,7 +118,7 @@ export default function WalletPage() {
         ))}
       </ul>
 
-      <Card>
+      <Card id="wallet-internal-transfer">
         <CardHeader title={t("wallet.internalTransfer")} />
         <form onSubmit={transfer} className="space-y-4">
           <Input
