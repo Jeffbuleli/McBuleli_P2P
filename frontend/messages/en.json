@@ -269,6 +269,8 @@
   "payment": {
     "title": "Mobile Money · PawaPay",
     "subtitle": "Enter amount and confirm — funds settle to your fiat wallet.",
+    "apiOk": "API connected",
+    "apiDown": "Cannot reach API — start the backend (e.g. port 4000) or set BACKEND_INTERNAL_URL for Next rewrites.",
     "amount": "Amount",
     "confirm": "Continue",
     "waiting": "Processing payment…",

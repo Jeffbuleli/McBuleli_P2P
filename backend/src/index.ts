@@ -39,11 +39,15 @@ app.get("/", (_req, res) =>
     ok: true,
     service: "mcbuleli-api",
     health: "/health",
+    healthApi: "/api/health",
     api: "/api",
   }),
 );
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "mcbuleli-api" }));
+
+/** Same payload as `/health`, under `/api` so Next.js `rewrites` (`/api/*` → backend) can probe the API. */
+app.get("/api/health", (_req, res) => res.json({ ok: true, service: "mcbuleli-api" }));
 
 app.use("/api", paymentsRoutes);
 app.use("/api/auth", authRoutes);

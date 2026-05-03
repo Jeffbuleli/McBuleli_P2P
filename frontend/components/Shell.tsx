@@ -25,7 +25,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="mx-auto flex max-w-lg items-center justify-between gap-2 px-4 pb-3 md:max-w-5xl">
           <Link
             href="/app/dashboard"
-            className="bg-gradient-to-r from-primary-800 via-brand-600 to-brand-500 bg-clip-text text-lg font-bold tracking-tight text-transparent dark:from-brand-400 dark:to-earth-400"
+            className="text-lg font-bold tracking-tight text-brand-600 dark:text-brand-400"
           >
             {t("shell.brand")}
           </Link>

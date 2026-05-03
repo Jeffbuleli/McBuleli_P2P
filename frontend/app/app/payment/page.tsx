@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Check, Loader2, Wallet } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
@@ -15,6 +15,21 @@ export default function PawaPayPaymentPage() {
   const { t } = useI18n();
   const [amount, setAmount] = useState("");
   const [step, setStep] = useState<Step>("enter");
+  const [apiOk, setApiOk] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/health", { cache: "no-store" })
+      .then((r) => {
+        if (!cancelled) setApiOk(r.ok);
+      })
+      .catch(() => {
+        if (!cancelled) setApiOk(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function onConfirm() {
     if (!amount.trim()) return;
@@ -26,6 +41,18 @@ export default function PawaPayPaymentPage() {
 
   return (
     <div className="mx-auto max-w-md space-y-5">
+      {apiOk !== null && (
+        <div
+          role="status"
+          className={`rounded-2xl border px-4 py-3 text-xs font-medium ${
+            apiOk
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100"
+              : "border-amber-500/45 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+          }`}
+        >
+          {apiOk ? t("payment.apiOk") : t("payment.apiDown")}
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-900 text-brand-400 shadow-card">
           <Wallet className="h-6 w-6" aria-hidden />
