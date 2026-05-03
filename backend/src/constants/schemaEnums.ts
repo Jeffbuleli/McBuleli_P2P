@@ -12,6 +12,8 @@ export const TransactionType = {
   P2P_ESCROW_RELEASE: "P2P_ESCROW_RELEASE",
   P2P_REFUND: "P2P_REFUND",
   ADJUSTMENT: "ADJUSTMENT",
+  STAKE_LOCK: "STAKE_LOCK",
+  STAKE_EXIT: "STAKE_EXIT",
 } as const;
 export type TransactionType = (typeof TransactionType)[keyof typeof TransactionType];
 
@@ -49,3 +51,9 @@ export const P2PDisputeStatus = {
   CANCELLED: "CANCELLED",
 } as const;
 export type P2PDisputeStatus = (typeof P2PDisputeStatus)[keyof typeof P2PDisputeStatus];
+
+export const StakeStatus = {
+  ACTIVE: "ACTIVE",
+  COMPLETED: "COMPLETED",
+} as const;
+export type StakeStatus = (typeof StakeStatus)[keyof typeof StakeStatus];

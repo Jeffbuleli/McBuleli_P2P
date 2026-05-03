@@ -1,10 +1,38 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+/**
+ * Vide = même origine que le front : Next.js proxifie `/api/*` vers Express (voir `next.config.ts`).
+ * Évite CORS et les écarts localhost vs 127.0.0.1 en dev.
+ * Pour appeler l’API sur un autre domaine (prod / tunnel), définir `NEXT_PUBLIC_API_URL`.
+ */
+export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "").trim();
 
 const FETCH_TIMEOUT_MS = 60_000;
 
+async function fetchApi(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (
+      e instanceof TypeError ||
+      msg.includes("Failed to fetch") ||
+      msg.includes("NetworkError") ||
+      msg.includes("Load failed")
+    ) {
+      throw new Error("NETWORK_UNAVAILABLE");
+    }
+    throw e;
+  }
+}
+
+/** Abort after FETCH_TIMEOUT_MS — works even when AbortSignal.timeout is missing (older Safari). */
 function defaultTimeoutSignal(): AbortSignal | undefined {
   if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
     return AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  }
+  if (typeof AbortController !== "undefined") {
+    const c = new AbortController();
+    setTimeout(() => c.abort(), FETCH_TIMEOUT_MS);
+    return c.signal;
   }
   return undefined;
 }
@@ -26,6 +54,45 @@ function messageFromApiError(error: unknown): string {
   return parts.length ? parts.join(" · ") : JSON.stringify(error);
 }
 
+/**
+ * Lit le corps d’une réponse d’erreur : JSON Express ou HTML/page Next si le proxy échoue.
+ * Évite d’afficher le libellé HTTP brut « Internal Server Error ».
+ */
+async function parseHttpError(res: Response): Promise<string> {
+  const text = await res.text();
+  const trimmed = text.trim();
+  let parsed: Partial<ApiError> = {};
+  if (trimmed.startsWith("{")) {
+    try {
+      parsed = JSON.parse(trimmed) as Partial<ApiError>;
+    } catch {
+      /* corps non JSON */
+    }
+  }
+  if (parsed.error !== undefined) {
+    const msg = messageFromApiError(parsed.error);
+    if (msg) return msg;
+  }
+
+  const st = res.status;
+  if (st === 502 || st === 503 || st === 504) return "NETWORK_UNAVAILABLE";
+
+  const looksLikeHtmlOrGeneric =
+    !trimmed ||
+    trimmed.startsWith("<") ||
+    /internal\s+server\s+error/i.test(text) ||
+    /bad\s+gateway/i.test(text);
+
+  if (st >= 500 && looksLikeHtmlOrGeneric) return "NETWORK_UNAVAILABLE";
+
+  if (st >= 500) return "INTERNAL";
+
+  const statusText = res.statusText?.trim();
+  if (statusText && !/^internal server error$/i.test(statusText)) return statusText;
+
+  return "NETWORK_UNAVAILABLE";
+}
+
 export type ApiError = { error: string | Record<string, unknown> };
 
 function getTokens() {
@@ -36,17 +103,13 @@ function getTokens() {
   };
 }
 
-export async function api<T>(
-  path: string,
-  init?: RequestInit & { auth?: boolean },
-): Promise<T> {
-  const auth = init?.auth !== false;
+/** GET/POST with Bearer + refresh on 401. Path must start with `/api/…`. */
+export async function authenticatedFetch(path: string, init?: RequestInit): Promise<Response> {
   const { access, refresh } = getTokens();
   const headers: HeadersInit = {
-    "Content-Type": "application/json",
     ...(init?.headers ?? {}),
   };
-  if (auth && access) {
+  if (access) {
     (headers as Record<string, string>)["Authorization"] = `Bearer ${access}`;
   }
   let res = await fetch(`${API_BASE}${path}`, {
@@ -68,7 +131,7 @@ export async function api<T>(
       localStorage.setItem("accessToken", j.accessToken);
       localStorage.setItem("refreshToken", j.refreshToken);
       (headers as Record<string, string>)["Authorization"] = `Bearer ${j.accessToken}`;
-      res = await fetch(`${API_BASE}${path}`, {
+      res = await fetchApi(`${API_BASE}${path}`, {
         ...init,
         headers,
         signal: init?.signal ?? defaultTimeoutSignal(),
@@ -76,10 +139,48 @@ export async function api<T>(
     }
   }
 
+  return res;
+}
+
+export async function api<T>(
+  path: string,
+  init?: RequestInit & { auth?: boolean },
+): Promise<T> {
+  const auth = init?.auth !== false;
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    ...(init?.headers ?? {}),
+  };
+
+  let res: Response;
+  if (!auth) {
+    res = await fetchApi(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+      signal: init?.signal ?? defaultTimeoutSignal(),
+    });
+  } else {
+    res = await authenticatedFetch(path, { ...init, headers });
+  }
+
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as ApiError;
-    const msg = body.error !== undefined ? messageFromApiError(body.error) : res.statusText;
-    throw new Error(msg);
+    throw new Error(await parseHttpError(res));
   }
   return res.json() as Promise<T>;
+}
+
+/** Télécharge un CSV (ou binaire) depuis une route protégée — déclenche le téléchargement navigateur. */
+export async function downloadAuthenticatedBlob(path: string, filename: string): Promise<void> {
+  const res = await authenticatedFetch(path, { method: "GET" });
+  if (!res.ok) {
+    throw new Error(await parseHttpError(res));
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  a.click();
+  URL.revokeObjectURL(url);
 }

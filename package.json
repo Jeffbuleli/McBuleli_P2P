@@ -1,0 +1,14 @@
+{
+  "name": "mcbuleli-p2p",
+  "private": true,
+  "description": "McBuleli P2P — monorepo root (frontend Next.js + backend Express)",
+  "scripts": {
+    "install:all": "npm install --prefix frontend && npm install --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:backend": "npm run build --prefix backend",
+    "build": "npm run build:frontend && npm run build:backend",
+    "vercel-build": "npm ci --prefix frontend && npm run build --prefix frontend"
+  }
+}

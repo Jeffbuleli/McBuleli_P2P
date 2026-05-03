@@ -35,6 +35,13 @@ enum TransactionType {
   P2P_ESCROW_RELEASE
   P2P_REFUND
   ADJUSTMENT
+  STAKE_LOCK
+  STAKE_EXIT
+}
+
+enum StakeStatus {
+  ACTIVE
+  COMPLETED
 }
 
 enum TransactionStatus {
@@ -82,6 +89,15 @@ enum WalletKind {
   FIAT
 }
 
+/// Rôles plateforme assignables par un admin (remplace en partie ADMIN_EMAILS / UUID trésorerie en dur).
+enum StaffRole {
+  ADMIN
+  /// Compte qui reçoit les frais d’intérêts staking (un seul à la fois en base).
+  TREASURY
+  /// Agent (support / modération) — droits métier à brancher progressivement.
+  AGENT
+}
+
 model User {
   id              String    @id @default(uuid()) @db.Uuid
   email           String    @unique
@@ -122,6 +138,9 @@ model User {
   internalTransfersOut InternalTransfer[] @relation("TransferFrom")
   internalTransfersIn  InternalTransfer[] @relation("TransferTo")
   kycSubmissions     KycSubmission[]
+  stakes             UserStake[]
+  staffRoles         UserStaffRole[] @relation("UserStaffRoles")
+  staffRolesAssigned UserStaffRole[] @relation("StaffAssignments")
 
   @@index([email])
   @@index([username])
@@ -252,14 +271,22 @@ model FiatDeposit {
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   amount        Decimal        @db.Decimal(28, 8)
   currency      FiatCurrency
+  /// MSISDN normalisé (ex. 243… ) pour Mobile Money
+  phoneNumber   String?
+  /// Code correspondant PawaPay (ex. ORANGE_MOMO_COD)
+  correspondent String?
+  /// Réf. côté PSP après callback (ex. providerTransactionId)
   externalRef   String?
   pawapayPayload Json?
+  failureReason String?
+  lastWebhookAt DateTime?
   status        PapawTxStatus @default(PENDING)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
   @@index([externalRef])
   @@index([userId])
+  @@index([status])
 }
 
 model FiatWithdrawal {
@@ -269,7 +296,12 @@ model FiatWithdrawal {
   amount        Decimal        @db.Decimal(28, 8)
   currency      FiatCurrency
   destinationMsisdn String?
+  /// Code correspondant PawaPay pour payout
+  correspondent String?
   externalRef   String?
+  pawapayPayload Json?
+  failureReason String?
+  lastWebhookAt DateTime?
   status        PapawTxStatus @default(PENDING)
   reviewedBy    String?
   fraudScore    Int?
@@ -277,6 +309,7 @@ model FiatWithdrawal {
   updatedAt     DateTime       @updatedAt
 
   @@index([userId])
+  @@index([status])
 }
 
 model P2POffer {
@@ -377,6 +410,62 @@ model SuspiciousFlag {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+model StakingPool {
+  id              String      @id @default(uuid()) @db.Uuid
+  slug            String      @unique
+  asset           CryptoAsset @default(USDT)
+  nameFr          String?
+  nameEn          String?
+  /// Annual yield in percent (e.g. 8.5 = 8.5% / year), simple interest basis
+  apyAnnual       Decimal     @db.Decimal(12, 6)
+  lockDays        Int
+  minAmount       Decimal     @db.Decimal(28, 8)
+  maxStakePerUser Decimal?    @db.Decimal(28, 8)
+  /// Share of gross interest retained by the platform (0–100)
+  rewardFeePercent Decimal    @default(0) @db.Decimal(8, 4)
+  /// Minimum seconds between two stake creations by the same user on this pool
+  cooldownSeconds Int         @default(0)
+  isActive        Boolean     @default(true)
+  sortOrder       Int         @default(0)
+  createdAt       DateTime    @default(now())
+
+  stakes UserStake[]
+}
+
+model UserStake {
+  id               String      @id @default(uuid()) @db.Uuid
+  userId           String      @db.Uuid
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  poolId           String      @db.Uuid
+  pool             StakingPool @relation(fields: [poolId], references: [id], onDelete: Restrict)
+  amount           Decimal     @db.Decimal(28, 8)
+  apySnapshot      Decimal     @db.Decimal(12, 6)
+  lockDaysSnapshot Int
+  /// Fee on gross interest, copied from pool at lock time
+  rewardFeePercentSnapshot Decimal @default(0) @db.Decimal(8, 4)
+  startedAt        DateTime    @default(now())
+  maturesAt        DateTime
+  rewardAmount     Decimal?    @db.Decimal(28, 8)
+  status           StakeStatus @default(ACTIVE)
+  settledAt        DateTime?
+
+  @@index([userId, status])
+  @@index([status, maturesAt])
+}
+
+model UserStaffRole {
+  userId           String    @db.Uuid
+  role             StaffRole
+  assignedAt       DateTime  @default(now())
+  assignedByUserId String?   @db.Uuid
+
+  user       User  @relation("UserStaffRoles", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy User? @relation("StaffAssignments", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  @@id([userId, role])
+  @@index([role])
 }
 
 model AdminAuditLog {

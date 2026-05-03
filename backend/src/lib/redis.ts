@@ -7,7 +7,20 @@ export function getRedis(): Redis | null {
   const url = env().REDIS_URL;
   if (!url) return null;
   if (!client) {
-    client = new Redis(url, { maxRetriesPerRequest: null });
+    // Offline queue disabled so commands fail fast; retryStrategy stops reconnect spam when Redis is down.
+    client = new Redis(url, {
+      maxRetriesPerRequest: 3,
+      connectTimeout: 10_000,
+      enableOfflineQueue: false,
+      retryStrategy(times: number) {
+        if (times > 8) return null;
+        return Math.min(times * 150, 2000);
+      },
+    });
+    // ioredis emits 'error' on connection failure; without a listener Node logs "Unhandled error event".
+    client.on("error", (err: Error) => {
+      console.warn("[redis]", err.message);
+    });
   }
   return client;
 }

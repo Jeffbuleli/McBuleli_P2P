@@ -1,5 +1,6 @@
 import express, { type Router } from "express";
-import { handleDepositWebhook, verifyPawapaySignature } from "../services/pawapay.service.js";
+import { verifyPawapayWebhookSignature } from "../services/payments/pawapay.signature.js";
+import { processPawapayWebhookPayload } from "../services/payments/webhook.service.js";
 import { env } from "../config/env.js";
 
 type ReqWithRaw = express.Request & { rawBody?: string };
@@ -16,21 +17,23 @@ export function createWebhookRouter(): Router {
 
   r.post("/pawapay", async (req, res) => {
     const raw = (req as ReqWithRaw).rawBody ?? "";
-    const sig = req.headers["x-pawapay-signature"] as string | undefined;
-    if (env().NODE_ENV === "production" && !verifyPawapaySignature(raw, sig)) {
+    const sig =
+      (req.headers["x-pawapay-signature"] as string | undefined) ??
+      (req.headers["x-signature"] as string | undefined);
+
+    const signatureOk = verifyPawapayWebhookSignature(raw, sig);
+    if (env().NODE_ENV === "production" && !signatureOk) {
+      console.warn("[pawapay] webhook rejected: bad or missing signature");
       return res.status(401).json({ error: "BAD_SIGNATURE" });
     }
-    const body = req.body as {
-      externalRef: string;
-      status: "SUCCESS" | "FAILED";
-      amount?: string;
-      currency?: string;
-    };
+
     try {
-      await handleDepositWebhook(body);
-      return res.json({ received: true });
-    } catch {
-      return res.status(500).json({ error: "WEBHOOK_ERROR" });
+      const result = await processPawapayWebhookPayload(req.body);
+      return res.json({ ok: true, ...result });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "WEBHOOK_ERROR";
+      console.error("[pawapay] webhook handler", e);
+      return res.status(msg === "INVALID_BODY" ? 400 : 500).json({ error: msg });
     }
   });
 

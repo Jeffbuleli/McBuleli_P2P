@@ -2,10 +2,13 @@
   "name": "McBuleli P2P",
   "short_name": "McBuleli",
   "description": "Custodial crypto & P2P for Africa",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#09090b",
-  "theme_color": "#032b26",
+  "display_override": ["standalone", "browser"],
+  "background_color": "#0d0d0f",
+  "theme_color": "#10b981",
   "icons": [
     {
       "src": "/icons/icon-192.png",

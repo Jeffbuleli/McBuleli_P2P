@@ -8,7 +8,7 @@ import { hashPassword, verifyPassword, sha256Hex } from "../utils/hash.js";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
 import { newReference } from "../utils/refs.js";
 import { env } from "../config/env.js";
-import type { User } from "@prisma/client";
+import { Prisma, type User } from "@prisma/client";
 
 const REFRESH_DAYS = 7;
 
@@ -29,20 +29,32 @@ export async function registerUser(input: {
   const email = input.email.toLowerCase().trim();
   const username = input.username.toLowerCase().trim();
   const passwordHash = await hashPassword(input.password);
-  const user = await prisma.user.create({
-    data: {
-      email,
-      username,
-      passwordHash,
-      fullName: input.fullName,
-      phone: input.phone,
-      country: input.country ?? "CD",
-    },
-  });
+  let user: User;
+  try {
+    user = await prisma.user.create({
+      data: {
+        email,
+        username,
+        passwordHash,
+        fullName: input.fullName,
+        phone: input.phone,
+        country: input.country ?? "CD",
+      },
+    });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw new Error("DUPLICATE");
+    }
+    throw e;
+  }
   const token = uuidv4();
   const r = getRedis();
   if (r) {
-    await r.setex(`emailverify:${user.id}`, 86400, sha256Hex(token));
+    try {
+      await r.setex(`emailverify:${user.id}`, 86400, sha256Hex(token));
+    } catch (e) {
+      console.warn("[auth] Redis unavailable; email verify token not stored:", e);
+    }
   }
   // In production, send email with link `${APP_URL}/verify-email?token=...&uid=...`
   if (env().NODE_ENV === "development") {

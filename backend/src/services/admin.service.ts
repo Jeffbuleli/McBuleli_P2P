@@ -38,6 +38,28 @@ export async function freezeUser(userId: string, adminEmail: string, frozen: boo
   });
 }
 
+export async function listOpenDisputesForStaff() {
+  return prisma.p2PDispute.findMany({
+    where: { status: "OPEN" },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: {
+      openedBy: { select: { email: true, username: true } },
+      trade: {
+        select: {
+          id: true,
+          referenceId: true,
+          status: true,
+          cryptoAmount: true,
+          fiatAmount: true,
+          buyer: { select: { email: true, username: true } },
+          seller: { select: { email: true, username: true } },
+        },
+      },
+    },
+  });
+}
+
 export async function resolveDispute(
   tradeId: string,
   resolution: P2PDisputeStatus,

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
+import { getStaffRoles, isPlatformAdmin } from "../services/staff-role.service.js";
 import { requireAuth, type AuthedRequest } from "../middlewares/authMiddleware.js";
 
 const r = Router();
@@ -25,7 +26,11 @@ r.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     },
   });
   if (!u) return res.status(404).json({ error: "NOT_FOUND" });
-  return res.json(u);
+  const [isAdmin, staffRoles] = await Promise.all([
+    isPlatformAdmin(u.id, u.email),
+    getStaffRoles(u.id),
+  ]);
+  return res.json({ ...u, isAdmin, staffRoles });
 });
 
 r.patch("/me", requireAuth, async (req: AuthedRequest, res) => {

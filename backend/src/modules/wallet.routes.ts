@@ -2,7 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { WalletKind } from "../constants/schemaEnums.js";
 import { requireAuth, requireVerifiedEmail, type AuthedRequest } from "../middlewares/authMiddleware.js";
-import { getBalances, internalTransfer, initiateFiatDeposit, requestFiatWithdraw } from "../services/wallet.service.js";
+import { getBalances, internalTransfer } from "../services/wallet.service.js";
+import { initiateDeposit } from "../services/payments/deposit.service.js";
+import { requestWithdrawal } from "../services/payments/withdrawal.service.js";
 import { prisma } from "../lib/prisma.js";
 import { strictLimiter } from "../middlewares/rateLimit.js";
 
@@ -50,6 +52,7 @@ r.post("/transfer", requireAuth, requireVerifiedEmail, strictLimiter, async (req
 });
 
 const depositSchema = z.object({
+  phoneNumber: z.string().min(8),
   amount: z.string().regex(/^\d+(\.\d+)?$/),
   currency: z.enum(["CDF", "USD", "EUR"]),
 });
@@ -57,11 +60,22 @@ const depositSchema = z.object({
 r.post("/fiat/deposit", requireAuth, requireVerifiedEmail, async (req: AuthedRequest, res) => {
   const parsed = depositSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const dep = await initiateFiatDeposit(req.userId!, parsed.data.amount, parsed.data.currency);
-  return res.status(201).json({
-    deposit: dep,
-    nextStep: "Complete payment via Mobile Money using PawaPay (integrate client SDK / redirect URL).",
-  });
+  try {
+    const out = await initiateDeposit(
+      req.userId!,
+      parsed.data.phoneNumber,
+      parsed.data.amount,
+      parsed.data.currency,
+    );
+    return res.status(201).json({
+      ...out,
+      nextStep: "Approve the Mobile Money prompt; balance updates after PawaPay callback.",
+    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "ERROR";
+    if (msg.startsWith("PAWAPAY_DEPOSIT_REJECTED")) return res.status(502).json({ error: msg });
+    return res.status(400).json({ error: msg });
+  }
 });
 
 const withdrawSchema = z.object({
@@ -74,11 +88,11 @@ r.post("/fiat/withdraw", requireAuth, requireVerifiedEmail, strictLimiter, async
   const parsed = withdrawSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   try {
-    const out = await requestFiatWithdraw(
+    const out = await requestWithdrawal(
       req.userId!,
+      parsed.data.msisdn,
       parsed.data.amount,
       parsed.data.currency,
-      parsed.data.msisdn,
     );
     return res.status(201).json(out);
   } catch (e: unknown) {

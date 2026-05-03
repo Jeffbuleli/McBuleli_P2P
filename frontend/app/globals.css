@@ -4,8 +4,81 @@
 
 :root {
   color-scheme: light dark;
+  --surface: #f8fafc;
+  --surface-secondary: #ffffff;
+  --surface-elevated: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-muted: #64748b;
+  --stroke-earth: rgba(93, 64, 55, 0.2);
+  --stroke-brand: rgba(16, 185, 129, 0.35);
+}
+
+.dark {
+  color-scheme: dark;
+  --surface: #0d0d0f;
+  --surface-secondary: #1a1a1d;
+  --surface-elevated: #242427;
+  --text-primary: #f4f4f5;
+  --text-muted: #a1a1aa;
 }
 
 body {
-  @apply bg-zinc-950 text-zinc-100 antialiased min-h-screen;
+  @apply min-h-screen antialiased transition-colors duration-200;
+  background-color: var(--surface);
+  color: var(--text-primary);
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% -18%, rgba(16, 185, 129, 0.12), transparent 55%),
+    radial-gradient(ellipse 90% 55% at 100% 100%, rgba(15, 39, 68, 0.15), transparent 52%),
+    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 50%, #f8fafc 100%);
+}
+
+.dark body {
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% -18%, rgba(16, 185, 129, 0.14), transparent 55%),
+    radial-gradient(ellipse 90% 55% at 100% 100%, rgba(93, 64, 55, 0.12), transparent 52%),
+    linear-gradient(180deg, #0d0d0f 0%, #121214 42%, #0d0d0f 100%);
+}
+
+@layer utilities {
+  .text-default {
+    color: var(--text-primary);
+  }
+  .text-muted {
+    color: var(--text-muted);
+  }
+  .bg-surface {
+    background-color: var(--surface-secondary);
+  }
+}
+
+/* Zone sûre encoche iOS / Android PWA */
+@supports (padding: max(0px)) {
+  .safe-pb {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  .safe-pt {
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+  }
+}
+
+/* Feuille menu compte — mobile PWA (évite la sensation « tout disparaît » d’un coup sec) */
+@keyframes user-menu-sheet-in {
+  from {
+    transform: translate3d(0, 100%, 0);
+    opacity: 0.92;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+.user-menu-sheet-mobile {
+  animation: user-menu-sheet-in 0.32s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-menu-sheet-mobile {
+    animation: none;
+  }
 }

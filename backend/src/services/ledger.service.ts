@@ -43,75 +43,39 @@ type LedgerOp = {
 /**
  * Apply a signed amount to available balance and write ledger + transaction row.
  * amount > 0 credit, amount < 0 debit.
+ * Use inside an existing interactive transaction when composing with other writes.
  */
-export async function applyBalanceChange(
+export async function applyBalanceChangeTx(
+  db: Prisma.TransactionClient,
   op: LedgerOp,
   txType: TransactionType,
   txStatus: TransactionStatus = "SUCCESS",
+  options?: { transactionReferenceId?: string },
 ): Promise<void> {
   const { userId, kind, currencyCode, amount, type, referenceType, referenceId, metadata } = op;
-  await prisma.$transaction(async (db) => {
-    const account = await db.walletAccount.findUnique({
-      where: { userId_kind_currencyCode: { userId, kind, currencyCode } },
+  const account = await db.walletAccount.findUnique({
+    where: { userId_kind_currencyCode: { userId, kind, currencyCode } },
+  });
+  if (!account) {
+    if (amount.lessThan(0)) throw new InsufficientFundsError();
+    await db.walletAccount.create({
+      data: {
+        userId,
+        kind,
+        currencyCode,
+        balance: amount,
+        lockedBalance: new Decimal(0),
+      },
     });
-    if (!account) {
-      if (amount.lessThan(0)) throw new InsufficientFundsError();
-      await db.walletAccount.create({
-        data: {
-          userId,
-          kind,
-          currencyCode,
-          balance: amount,
-          lockedBalance: new Decimal(0),
-        },
-      });
-      const created = await db.walletAccount.findUniqueOrThrow({
-        where: { userId_kind_currencyCode: { userId, kind, currencyCode } },
-      });
-      await db.ledgerEntry.create({
-        data: {
-          accountId: created.id,
-          userId,
-          amount,
-          balanceAfter: amount,
-          type,
-          referenceType,
-          referenceId,
-          metadata: metadata ?? undefined,
-        },
-      });
-      await db.transaction.create({
-        data: {
-          referenceId: newReference("TX"),
-          userId,
-          type: txType,
-          status: txStatus,
-          amount: amount.abs(),
-          currency: currencyCode,
-          metadata: {
-            direction: amount.greaterThan(0) ? "in" : "out",
-            ledgerType: type,
-            referenceType,
-            referenceId,
-          } as Prisma.InputJsonValue,
-        },
-      });
-      return;
-    }
-
-    const next = account.balance.add(amount);
-    if (next.lessThan(0)) throw new InsufficientFundsError();
-
-    await db.walletAccount.update({
-      where: { id: account.id },
-      data: { balance: next },
+    const created = await db.walletAccount.findUniqueOrThrow({
+      where: { userId_kind_currencyCode: { userId, kind, currencyCode } },
     });
     await db.ledgerEntry.create({
       data: {
-        accountId: account.id,
+        accountId: created.id,
         userId,
         amount,
-        balanceAfter: next,
+        balanceAfter: amount,
         type,
         referenceType,
         referenceId,
@@ -120,7 +84,7 @@ export async function applyBalanceChange(
     });
     await db.transaction.create({
       data: {
-        referenceId: newReference("TX"),
+        referenceId: options?.transactionReferenceId ?? newReference("TX"),
         userId,
         type: txType,
         status: txStatus,
@@ -134,6 +98,54 @@ export async function applyBalanceChange(
         } as Prisma.InputJsonValue,
       },
     });
+    return;
+  }
+
+  const next = account.balance.add(amount);
+  if (next.lessThan(0)) throw new InsufficientFundsError();
+
+  await db.walletAccount.update({
+    where: { id: account.id },
+    data: { balance: next },
+  });
+  await db.ledgerEntry.create({
+    data: {
+      accountId: account.id,
+      userId,
+      amount,
+      balanceAfter: next,
+      type,
+      referenceType,
+      referenceId,
+      metadata: metadata ?? undefined,
+    },
+  });
+  await db.transaction.create({
+    data: {
+      referenceId: options?.transactionReferenceId ?? newReference("TX"),
+      userId,
+      type: txType,
+      status: txStatus,
+      amount: amount.abs(),
+      currency: currencyCode,
+      metadata: {
+        direction: amount.greaterThan(0) ? "in" : "out",
+        ledgerType: type,
+        referenceType,
+        referenceId,
+      } as Prisma.InputJsonValue,
+    },
+  });
+}
+
+export async function applyBalanceChange(
+  op: LedgerOp,
+  txType: TransactionType,
+  txStatus: TransactionStatus = "SUCCESS",
+  options?: { transactionReferenceId?: string },
+): Promise<void> {
+  await prisma.$transaction(async (db) => {
+    await applyBalanceChangeTx(db, op, txType, txStatus, options);
   });
 }
 

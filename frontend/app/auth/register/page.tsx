@@ -3,10 +3,20 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { api } from "@/lib/api";
+import { useI18n } from "@/components/I18nProvider";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { translateAuthApiMessage } from "@/lib/i18n/translate-api";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { t } = useI18n();
+
   const [form, setForm] = useState({
     email: "",
     password: "",
@@ -14,6 +24,7 @@ export default function RegisterPage() {
     username: "",
     country: "CD",
   });
+  const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -25,7 +36,12 @@ export default function RegisterPage() {
       await api("/api/auth/register", {
         method: "POST",
         auth: false,
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          email: form.email.trim(),
+          username: form.username.trim(),
+          fullName: form.fullName.trim(),
+        }),
       });
       router.push("/auth/login?registered=1");
     } catch (e: unknown) {
@@ -36,9 +52,10 @@ export default function RegisterPage() {
           "name" in e &&
           String((e as { name: unknown }).name) === "AbortError");
       if (aborted) {
-        setErr("Request timed out. Check NEXT_PUBLIC_API_URL and that the API is running.");
+        setErr(t("auth.errors.timeout"));
       } else {
-        setErr(e instanceof Error ? e.message : "Registration failed");
+        const raw = e instanceof Error ? e.message : "Registration failed";
+        setErr(translateAuthApiMessage(raw, t));
       }
     } finally {
       setLoading(false);
@@ -46,61 +63,76 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm px-4 py-16">
-      <h1 className="text-2xl font-bold text-white">Create account</h1>
-      <p className="mt-1 text-sm text-zinc-500">DRC & Africa — verify email to trade</p>
-      <form onSubmit={submit} className="mt-8 space-y-4">
-        {[
-          ["fullName", "Full name"],
-          ["username", "Username"],
-          ["email", "Email"],
-        ].map(([k, label]) => (
-          <div key={k}>
-            <label className="text-xs text-zinc-500">{label}</label>
-            <input
-              required
-              type={k === "email" ? "email" : "text"}
-              value={(form as Record<string, string>)[k]}
-              onChange={(e) => setForm({ ...form, [k]: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+    <div className="relative min-h-screen bg-gradient-to-b from-slate-50 to-white px-4 py-16 text-slate-900 dark:from-[#0b0d12] dark:to-[#0d0d0f] dark:text-zinc-100">
+      <div className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] flex gap-2">
+        <ThemeToggle />
+        <LanguageSwitcher />
+      </div>
+
+      <div className="mx-auto max-w-sm">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t("auth.register.title")}</h1>
+        <p className="mt-1 text-sm text-slate-600 dark:text-zinc-500">{t("auth.register.subtitle")}</p>
+
+        <Card className="mt-8">
+          <form onSubmit={submit} className="space-y-4">
+            {(
+              [
+                ["fullName", t("auth.register.fullName")],
+                ["username", t("auth.register.username")],
+                ["email", t("auth.register.email")],
+              ] as const
+            ).map(([k, label]) => (
+              <Input
+                key={k}
+                label={label}
+                required
+                type={k === "email" ? "email" : "text"}
+                autoComplete={k === "email" ? "email" : k === "username" ? "username" : "name"}
+                value={form[k]}
+                onChange={(e) => setForm({ ...form, [k]: e.target.value })}
+              />
+            ))}
+            <div className="relative">
+              <Input
+                label={t("auth.register.password")}
+                type={showPw ? "text" : "password"}
+                required
+                minLength={10}
+                autoComplete="new-password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                className="pr-12"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setShowPw((s) => !s)}
+                className="absolute right-3 top-[30px] rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                aria-label={showPw ? t("auth.hidePassword") : t("auth.showPassword")}
+              >
+                {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            <Input
+              label={t("auth.register.country")}
+              value={form.country}
+              onChange={(e) => setForm({ ...form, country: e.target.value.toUpperCase().slice(0, 2) })}
+              maxLength={2}
             />
-          </div>
-        ))}
-        <div>
-          <label className="text-xs text-zinc-500">Password (min 10 chars)</label>
-          <input
-            type="password"
-            required
-            minLength={10}
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
-          />
-        </div>
-        <div>
-          <label className="text-xs text-zinc-500">Country (ISO-2)</label>
-          <input
-            value={form.country}
-            onChange={(e) => setForm({ ...form, country: e.target.value.toUpperCase().slice(0, 2) })}
-            maxLength={2}
-            className="mt-1 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
-          />
-        </div>
-        {err && <p className="text-sm text-red-400">{err}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          {loading ? "Creating account…" : "Register"}
-        </button>
-      </form>
-      <p className="mt-6 text-center text-sm text-zinc-500">
-        Already have an account?{" "}
-        <Link href="/auth/login" className="text-brand-400 hover:underline">
-          Sign in
-        </Link>
-      </p>
+            {err && <p className="text-sm text-red-600 dark:text-red-400">{err}</p>}
+            <Button type="submit" variant="primary" size="lg" className="w-full" disabled={loading}>
+              {loading ? t("auth.register.loading") : t("auth.register.submit")}
+            </Button>
+          </form>
+        </Card>
+
+        <p className="mt-6 text-center text-sm text-slate-600 dark:text-zinc-500">
+          {t("auth.register.hasAccount")}{" "}
+          <Link href="/auth/login" className="font-semibold text-brand-600 hover:underline dark:text-brand-400">
+            {t("auth.register.signIn")}
+          </Link>
+        </p>
+      </div>
     </div>
   );
 }

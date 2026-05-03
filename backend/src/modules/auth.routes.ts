@@ -35,7 +35,7 @@ r.post("/register", authLimiter, async (req, res) => {
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "ERROR";
-    if (msg.includes("Unique")) return res.status(409).json({ error: "DUPLICATE" });
+    if (msg === "DUPLICATE") return res.status(409).json({ error: "DUPLICATE" });
     return res.status(400).json({ error: msg });
   }
 });
@@ -63,6 +63,11 @@ r.post("/login", authLimiter, async (req, res) => {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "ERROR";
     if (msg === "2FA_REQUIRED") return res.status(401).json({ error: "2FA_REQUIRED" });
+    if (msg === "ACCOUNT_FROZEN") return res.status(403).json({ error: "ACCOUNT_FROZEN" });
+    if (msg !== "INVALID_CREDENTIALS") {
+      console.error("[auth/login]", e);
+      return res.status(500).json({ error: "INTERNAL" });
+    }
     return res.status(401).json({ error: "INVALID_CREDENTIALS" });
   }
 });
