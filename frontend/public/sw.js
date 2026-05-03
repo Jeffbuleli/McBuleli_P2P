@@ -1,6 +1,6 @@
 /* eslint-disable no-undef */
 /** Bump pour forcer la mise à jour du SW chez les clients. */
-const CACHE = "mcbuleli-v2";
+const CACHE = "mcbuleli-v3";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

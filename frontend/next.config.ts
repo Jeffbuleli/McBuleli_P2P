@@ -13,6 +13,10 @@ const BACKEND_INTERNAL_URL =
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  /** Réduit la surface d’import lucide (barrel) et évite des erreurs Webpack du type `__webpack_modules__[moduleId] is not a function` liées au découpage des chunks. */
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+  },
   /** Monorepo: trace deps from repo root. If `/_next/static/css/*.css` 404s after deploy, confirm host Root Directory = `frontend` and run `npm run build` from `frontend`. */
   outputFileTracingRoot: monorepoRoot,
   /** Quand NEXT_PUBLIC_API_URL est vide, le front appelle /api/… sur le même hôte que Next ; pas de CORS. */
