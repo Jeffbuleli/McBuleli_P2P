@@ -32,7 +32,8 @@ const schema = z.object({
   PLATFORM_STAKING_FEES_USER_ID: z.string().uuid().optional(),
   PAWAPAY_API_KEY: z.string().optional(),
   PAWAPAY_WEBHOOK_SECRET: z.string().optional(),
-  PAWAPAY_BASE_URL: z.string().url().optional(),
+  /** Démo / intégration : toujours sandbox. Prod uniquement : https://api.pawapay.io */
+  PAWAPAY_BASE_URL: z.string().url().default("https://api.sandbox.pawapay.io"),
   /** URL publique des webhooks (documentation / dashboard PawaPay) */
   CALLBACK_URL: z.string().url().optional(),
   /** Correspondant Mobile Money pour dépôt (ex. ORANGE_MOMO_COD) — par devise */

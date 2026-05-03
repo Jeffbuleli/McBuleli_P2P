@@ -4,8 +4,6 @@
  */
 import { env } from "../../config/env.js";
 
-const DEFAULT_SANDBOX = "https://api.sandbox.pawapay.io";
-
 export type PawaPayDepositBody = {
   depositId: string;
   amount: string;
@@ -28,7 +26,7 @@ export type PawaPayPayoutBody = {
 };
 
 function baseUrl(): string {
-  return env().PAWAPAY_BASE_URL ?? DEFAULT_SANDBOX;
+  return env().PAWAPAY_BASE_URL.replace(/\/$/, "");
 }
 
 function headers(extra?: Record<string, string>): HeadersInit {
@@ -44,7 +42,7 @@ function headers(extra?: Record<string, string>): HeadersInit {
 }
 
 export async function pawapayRequestDeposit(body: PawaPayDepositBody): Promise<{ ok: boolean; status: number; json: unknown }> {
-  const url = `${baseUrl().replace(/\/$/, "")}/v2/deposits`;
+  const url = `${baseUrl()}/v2/deposits`;
   const idempotencyKey = body.depositId;
   const res = await fetch(url, {
     method: "POST",
@@ -63,7 +61,7 @@ export async function pawapayRequestDeposit(body: PawaPayDepositBody): Promise<{
 }
 
 export async function pawapayRequestPayout(body: PawaPayPayoutBody): Promise<{ ok: boolean; status: number; json: unknown }> {
-  const url = `${baseUrl().replace(/\/$/, "")}/v2/payouts`;
+  const url = `${baseUrl()}/v2/payouts`;
   const idempotencyKey = body.payoutId;
   const res = await fetch(url, {
     method: "POST",
