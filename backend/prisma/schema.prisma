@@ -64,9 +64,9 @@ enum P2POfferStatus {
 }
 
 enum P2PTradeStatus {
-  AWAITING_PAYMENT
+  PENDING
   PAID
-  COMPLETED
+  RELEASED
   CANCELLED
   DISPUTED
 }
@@ -76,6 +76,25 @@ enum P2PDisputeStatus {
   RESOLVED_BUYER
   RESOLVED_SELLER
   CANCELLED
+}
+
+enum P2PActivityAction {
+  TRADE_CREATED
+  MARKED_PAID
+  RELEASED
+  CANCELLED
+  DISPUTE_OPENED
+  AUTO_EXPIRED
+  DISPUTE_RESOLVED_BUYER
+  DISPUTE_RESOLVED_SELLER
+}
+
+enum UserNotificationType {
+  P2P_TRADE_NEW
+  P2P_TRADE_PAID
+  P2P_TRADE_RELEASED
+  P2P_TRADE_CANCELLED
+  P2P_DISPUTE_OPENED
 }
 
 enum PapawTxStatus {
@@ -110,7 +129,10 @@ model User {
   kycStatus       KycStatus @default(PENDING)
   profilePhotoUrl String?
   p2pRatingAvg    Decimal   @default(0) @db.Decimal(4, 2)
+  /// Successful P2P trades (crypto released to buyer).
   completedTrades Int       @default(0)
+  /// All P2P trades that reached a terminal outcome (released, cancelled, or dispute-resolved).
+  p2pTradesTotal  Int       @default(0)
   isFrozen        Boolean   @default(false)
   isBlacklisted   Boolean   @default(false)
   twoFactorEnabled Boolean  @default(false)
@@ -141,6 +163,7 @@ model User {
   stakes             UserStake[]
   staffRoles         UserStaffRole[] @relation("UserStaffRoles")
   staffRolesAssigned UserStaffRole[] @relation("StaffAssignments")
+  notifications    Notification[]
 
   @@index([email])
   @@index([username])
@@ -345,20 +368,22 @@ model P2PTrade {
   seller         User           @relation("SellerTrades", fields: [sellerId], references: [id], onDelete: Cascade)
   cryptoAmount   Decimal        @db.Decimal(28, 8)
   fiatAmount     Decimal        @db.Decimal(28, 8)
-  status         P2PTradeStatus @default(AWAITING_PAYMENT)
+  status         P2PTradeStatus @default(PENDING)
   timerEndsAt    DateTime
   paidAt         DateTime?
   completedAt    DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  messages P2PTradeMessage[]
-  dispute  P2PDispute?
-  rating   Rating?
+  messages  P2PTradeMessage[]
+  dispute   P2PDispute?
+  rating    Rating?
+  activities P2PTradeActivity[]
 
   @@index([buyerId])
   @@index([sellerId])
   @@index([status])
+  @@index([offerId, status])
 }
 
 model P2PTradeMessage {
@@ -397,6 +422,34 @@ model Rating {
   score      Int
   comment    String?
   createdAt  DateTime @default(now())
+}
+
+/// Append-only audit trail for P2P trades (compliance & support).
+model P2PTradeActivity {
+  id        String            @id @default(uuid()) @db.Uuid
+  tradeId   String            @db.Uuid
+  trade     P2PTrade          @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  actorId   String?           @db.Uuid
+  action    P2PActivityAction
+  metadata  Json?
+  createdAt DateTime          @default(now())
+
+  @@index([tradeId, createdAt])
+}
+
+model Notification {
+  id        String              @id @default(uuid()) @db.Uuid
+  userId    String              @db.Uuid
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      UserNotificationType
+  title     String
+  body      String
+  readAt    DateTime?
+  metadata  Json?
+  createdAt DateTime            @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
 }
 
 model SuspiciousFlag {

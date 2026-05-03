@@ -20,6 +20,7 @@ r.get("/me", requireAuth, async (req: AuthedRequest, res) => {
       profilePhotoUrl: true,
       p2pRatingAvg: true,
       completedTrades: true,
+      p2pTradesTotal: true,
       createdAt: true,
       emailVerifiedAt: true,
       twoFactorEnabled: true,
@@ -30,7 +31,11 @@ r.get("/me", requireAuth, async (req: AuthedRequest, res) => {
     isPlatformAdmin(u.id, u.email),
     getStaffRoles(u.id),
   ]);
-  return res.json({ ...u, isAdmin, staffRoles });
+  const p2pSuccessRatePct =
+    u.p2pTradesTotal > 0
+      ? Math.round((Number(u.completedTrades) / u.p2pTradesTotal) * 10000) / 100
+      : null;
+  return res.json({ ...u, isAdmin, staffRoles, p2pSuccessRatePct });
 });
 
 r.patch("/me", requireAuth, async (req: AuthedRequest, res) => {
@@ -62,12 +67,17 @@ r.get("/:username/public", async (req, res) => {
       username: true,
       p2pRatingAvg: true,
       completedTrades: true,
+      p2pTradesTotal: true,
       createdAt: true,
       country: true,
     },
   });
   if (!u) return res.status(404).json({ error: "NOT_FOUND" });
-  return res.json(u);
+  const p2pSuccessRatePct =
+    u.p2pTradesTotal > 0
+      ? Math.round((Number(u.completedTrades) / u.p2pTradesTotal) * 10000) / 100
+      : null;
+  return res.json({ ...u, p2pSuccessRatePct });
 });
 
 export default r;

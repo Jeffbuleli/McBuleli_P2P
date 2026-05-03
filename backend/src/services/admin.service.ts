@@ -1,8 +1,8 @@
 import { KycStatus, P2PDisputeStatus, TransactionType } from "../constants/schemaEnums.js";
 import { prisma } from "../lib/prisma.js";
 import {
-  releaseLockedToBuyer,
-  refundLockedToSeller,
+  releaseLockedToBuyerTx,
+  refundLockedToSellerTx,
   applyBalanceChange,
 } from "./ledger.service.js";
 function cryptoCodeFromAsset(a: "USDT" | "BTC") {
@@ -73,44 +73,82 @@ export async function resolveDispute(
 
   const cryptoCode = cryptoCodeFromAsset(trade.offer.cryptoAsset);
 
-  if (resolution === "RESOLVED_BUYER") {
-    await releaseLockedToBuyer(
-      trade.sellerId,
-      trade.buyerId,
-      "CRYPTO",
-      cryptoCode,
-      trade.cryptoAmount,
-      "P2PTrade",
-      trade.id,
-    );
-    await prisma.p2PTrade.update({
-      where: { id: tradeId },
-      data: { status: "COMPLETED", completedAt: new Date() },
-    });
-  } else if (resolution === "RESOLVED_SELLER") {
-    await refundLockedToSeller(
-      trade.sellerId,
-      "CRYPTO",
-      cryptoCode,
-      trade.cryptoAmount,
-      "P2PTrade",
-      trade.id,
-    );
-    await prisma.p2PTrade.update({
-      where: { id: tradeId },
-      data: { status: "CANCELLED" },
-    });
-  } else {
-    throw new Error("INVALID_RESOLUTION");
-  }
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT id FROM "P2PTrade" WHERE id = $1::uuid FOR UPDATE`, tradeId);
 
-  await prisma.p2PDispute.update({
-    where: { tradeId },
-    data: {
-      status: resolution,
-      resolvedAt: new Date(),
-      resolution: adminEmail,
-    },
+    if (resolution === "RESOLVED_BUYER") {
+      await releaseLockedToBuyerTx(
+        tx,
+        trade.sellerId,
+        trade.buyerId,
+        "CRYPTO",
+        cryptoCode,
+        trade.cryptoAmount,
+        "P2PTrade",
+        trade.id,
+      );
+      await tx.p2PTrade.update({
+        where: { id: tradeId },
+        data: { status: "RELEASED", completedAt: new Date() },
+      });
+      await tx.p2PTradeActivity.create({
+        data: {
+          tradeId,
+          actorId: null,
+          action: "DISPUTE_RESOLVED_BUYER",
+          metadata: { adminEmail },
+        },
+      });
+      await tx.user.update({
+        where: { id: trade.buyerId },
+        data: { completedTrades: { increment: 1 }, p2pTradesTotal: { increment: 1 } },
+      });
+      await tx.user.update({
+        where: { id: trade.sellerId },
+        data: { completedTrades: { increment: 1 }, p2pTradesTotal: { increment: 1 } },
+      });
+    } else if (resolution === "RESOLVED_SELLER") {
+      await refundLockedToSellerTx(
+        tx,
+        trade.sellerId,
+        "CRYPTO",
+        cryptoCode,
+        trade.cryptoAmount,
+        "P2PTrade",
+        trade.id,
+      );
+      await tx.p2PTrade.update({
+        where: { id: tradeId },
+        data: { status: "CANCELLED" },
+      });
+      await tx.p2PTradeActivity.create({
+        data: {
+          tradeId,
+          actorId: null,
+          action: "DISPUTE_RESOLVED_SELLER",
+          metadata: { adminEmail },
+        },
+      });
+      await tx.user.update({
+        where: { id: trade.buyerId },
+        data: { p2pTradesTotal: { increment: 1 } },
+      });
+      await tx.user.update({
+        where: { id: trade.sellerId },
+        data: { p2pTradesTotal: { increment: 1 } },
+      });
+    } else {
+      throw new Error("INVALID_RESOLUTION");
+    }
+
+    await tx.p2PDispute.update({
+      where: { tradeId },
+      data: {
+        status: resolution,
+        resolvedAt: new Date(),
+        resolution: adminEmail,
+      },
+    });
   });
 
   await prisma.adminAuditLog.create({

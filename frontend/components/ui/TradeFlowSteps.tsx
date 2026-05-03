@@ -7,11 +7,11 @@ type StepVisual = "done" | "current" | "upcoming";
 
 function stepVisuals(status: string): StepVisual[] {
   switch (status) {
-    case "COMPLETED":
+    case "RELEASED":
       return ["done", "done", "done", "done", "done"];
     case "PAID":
       return ["done", "done", "done", "current", "upcoming"];
-    case "AWAITING_PAYMENT":
+    case "PENDING":
       return ["done", "current", "upcoming", "upcoming", "upcoming"];
     case "DISPUTED":
       return ["done", "done", "current", "upcoming", "upcoming"];

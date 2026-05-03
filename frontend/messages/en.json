@@ -37,6 +37,17 @@
     "trustSecure": "Encrypted sessions · verified counterparties",
     "liveQuotes": "Live quotes · indicative"
   },
+  "notifications": {
+    "title": "Notifications",
+    "subtitle": "Trades, escrow, and security alerts.",
+    "empty": "Nothing yet — we’ll surface important events here.",
+    "emptyLive": "No notifications yet. Start or take a P2P trade to see updates.",
+    "markRead": "Mark read",
+    "markAllRead": "Mark all read",
+    "sampleTrade": "Escrow funded — send payment before the timer ends.",
+    "samplePay": "Buyer marked paid — confirm receipt to release crypto.",
+    "sampleSecurity": "New login from a new device."
+  },
   "shell": {
     "brand": "McBuleli",
     "navHome": "Hub",
@@ -255,14 +266,6 @@
     "loadingBalances": "Loading balances…",
     "noBalances": "No balances yet — deposit to get started."
   },
-  "notifications": {
-    "title": "Notifications",
-    "subtitle": "Trades, transfers, and security",
-    "empty": "You’re all caught up.",
-    "sampleTrade": "Trade update · escrow funded",
-    "samplePay": "Deposit received · CDF",
-    "sampleSecurity": "New login from Chrome Mobile"
-  },
   "payment": {
     "title": "Mobile Money · PawaPay",
     "subtitle": "Enter amount and confirm — funds settle to your fiat wallet.",
@@ -355,12 +358,24 @@
     "chat": "Chat",
     "messagePlaceholder": "Message counterparty…",
     "status": {
-      "AWAITING_PAYMENT": "Awaiting payment",
+      "PENDING": "Awaiting payment",
       "PAID": "Paid",
-      "COMPLETED": "Completed",
+      "RELEASED": "Completed",
       "CANCELLED": "Cancelled",
       "DISPUTED": "Disputed",
       "EXPIRED": "Expired"
-    }
+    },
+    "countdown": "Time left to pay",
+    "paymentInstructions": "Payment instructions",
+    "offPlatform": "Send fiat off-platform (e.g. Mobile Money)",
+    "sendToSeller": "Use the details below to pay the seller",
+    "followOffer": "Coordinate with the counterparty per the offer",
+    "noPaymentDetails": "No payment details on file — use chat.",
+    "iHavePaid": "I have paid",
+    "openDispute": "Open a dispute",
+    "disputeHint": "If something is wrong and the other side is unresponsive, open a dispute. Support can release or refund escrow.",
+    "disputePlaceholder": "Describe the issue (min. 5 characters)",
+    "disputeSubmit": "Open dispute",
+    "disputeTooShort": "Please add a bit more detail (at least 5 characters)."
   }
 }

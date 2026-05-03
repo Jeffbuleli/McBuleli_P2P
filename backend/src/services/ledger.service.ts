@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { TransactionType, TransactionStatus, WalletKind } from "../constants/schemaEnums.js";
 import { prisma } from "../lib/prisma.js";
 import { newReference } from "../utils/refs.js";
@@ -149,6 +149,78 @@ export async function applyBalanceChange(
   });
 }
 
+type WalletRow = { id: string; balance: Decimal; lockedBalance: Decimal };
+
+/**
+ * Row-locked wallet read (PostgreSQL `FOR UPDATE`) — use inside an existing transaction.
+ */
+async function lockWalletRow(
+  db: Prisma.TransactionClient,
+  userId: string,
+  kind: WalletKind,
+  currencyCode: string,
+): Promise<WalletRow | null> {
+  const rows = await db.$queryRaw<WalletRow[]>(Prisma.sql`
+    SELECT id, balance, "lockedBalance"
+    FROM "WalletAccount"
+    WHERE "userId" = ${userId}::uuid
+      AND kind = ${kind}::"WalletKind"
+      AND "currencyCode" = ${currencyCode}
+    FOR UPDATE
+  `);
+  return rows[0] ?? null;
+}
+
+export async function moveToLockedTx(
+  db: Prisma.TransactionClient,
+  userId: string,
+  kind: WalletKind,
+  currencyCode: string,
+  amount: Decimal,
+  referenceType: string,
+  referenceId: string,
+): Promise<void> {
+  const account = await lockWalletRow(db, userId, kind, currencyCode);
+  if (!account || account.balance.lessThan(amount)) throw new InsufficientFundsError();
+
+  const balanceNext = account.balance.sub(amount);
+  const lockedNext = account.lockedBalance.add(amount);
+
+  await db.walletAccount.update({
+    where: { id: account.id },
+    data: {
+      balance: balanceNext,
+      lockedBalance: lockedNext,
+    },
+  });
+  await db.ledgerEntry.create({
+    data: {
+      accountId: account.id,
+      userId,
+      amount: amount.neg(),
+      balanceAfter: balanceNext,
+      type: "LOCK_ESCROW",
+      referenceType,
+      referenceId,
+    },
+  });
+  await db.transaction.create({
+    data: {
+      referenceId: newReference("TX"),
+      userId,
+      type: "P2P_ESCROW_LOCK",
+      status: "SUCCESS",
+      amount: amount.abs(),
+      currency: currencyCode,
+      metadata: {
+        ledgerType: "LOCK_ESCROW",
+        referenceType,
+        referenceId,
+      } as Prisma.InputJsonValue,
+    },
+  });
+}
+
 export async function moveToLocked(
   userId: string,
   kind: WalletKind,
@@ -158,28 +230,103 @@ export async function moveToLocked(
   referenceId: string,
 ): Promise<void> {
   await prisma.$transaction(async (db) => {
-    const account = await db.walletAccount.findUnique({
-      where: { userId_kind_currencyCode: { userId, kind, currencyCode } },
-    });
-    if (!account || account.balance.lessThan(amount)) throw new InsufficientFundsError();
-    await db.walletAccount.update({
-      where: { id: account.id },
+    await moveToLockedTx(db, userId, kind, currencyCode, amount, referenceType, referenceId);
+  });
+}
+
+export async function releaseLockedToBuyerTx(
+  db: Prisma.TransactionClient,
+  sellerId: string,
+  buyerId: string,
+  kind: WalletKind,
+  currencyCode: string,
+  amount: Decimal,
+  referenceType: string,
+  referenceId: string,
+): Promise<void> {
+  const seller = await lockWalletRow(db, sellerId, kind, currencyCode);
+  if (!seller || seller.lockedBalance.lessThan(amount)) {
+    throw new Error("ESCROW_MISMATCH");
+  }
+  await db.walletAccount.update({
+    where: { id: seller.id },
+    data: { lockedBalance: seller.lockedBalance.sub(amount) },
+  });
+  await db.transaction.create({
+    data: {
+      referenceId: newReference("TX"),
+      userId: sellerId,
+      type: "P2P_ESCROW_RELEASE",
+      status: "SUCCESS",
+      amount: amount.abs(),
+      currency: currencyCode,
+      metadata: {
+        direction: "escrow_release",
+        peer: buyerId,
+        referenceType,
+        referenceId,
+      } as Prisma.InputJsonValue,
+    },
+  });
+
+  const buyer = await lockWalletRow(db, buyerId, kind, currencyCode);
+  if (!buyer) {
+    await db.walletAccount.create({
       data: {
-        balance: account.balance.sub(amount),
-        lockedBalance: account.lockedBalance.add(amount),
+        userId: buyerId,
+        kind,
+        currencyCode,
+        balance: amount,
+        lockedBalance: new Decimal(0),
       },
+    });
+    const b = await db.walletAccount.findUniqueOrThrow({
+      where: { userId_kind_currencyCode: { userId: buyerId, kind, currencyCode } },
     });
     await db.ledgerEntry.create({
       data: {
-        accountId: account.id,
-        userId,
-        amount: amount.neg(),
-        balanceAfter: account.balance.sub(amount),
-        type: "LOCK_ESCROW",
+        accountId: b.id,
+        userId: buyerId,
+        amount,
+        balanceAfter: amount,
+        type: "P2P_RELEASE",
         referenceType,
         referenceId,
       },
     });
+  } else {
+    const nb = buyer.balance.add(amount);
+    await db.walletAccount.update({
+      where: { id: buyer.id },
+      data: { balance: nb },
+    });
+    await db.ledgerEntry.create({
+      data: {
+        accountId: buyer.id,
+        userId: buyerId,
+        amount,
+        balanceAfter: nb,
+        type: "P2P_RELEASE",
+        referenceType,
+        referenceId,
+      },
+    });
+  }
+  await db.transaction.create({
+    data: {
+      referenceId: newReference("TX"),
+      userId: buyerId,
+      type: "P2P_ESCROW_RELEASE",
+      status: "SUCCESS",
+      amount: amount.abs(),
+      currency: currencyCode,
+      metadata: {
+        direction: "in",
+        peer: sellerId,
+        referenceType,
+        referenceId,
+      } as Prisma.InputJsonValue,
+    },
   });
 }
 
@@ -193,61 +340,54 @@ export async function releaseLockedToBuyer(
   referenceId: string,
 ): Promise<void> {
   await prisma.$transaction(async (db) => {
-    const seller = await db.walletAccount.findUnique({
-      where: { userId_kind_currencyCode: { userId: sellerId, kind, currencyCode } },
-    });
-    if (!seller || seller.lockedBalance.lessThan(amount)) {
-      throw new Error("ESCROW_MISMATCH");
-    }
-    await db.walletAccount.update({
-      where: { id: seller.id },
-      data: { lockedBalance: seller.lockedBalance.sub(amount) },
-    });
-    const buyer = await db.walletAccount.findUnique({
-      where: { userId_kind_currencyCode: { userId: buyerId, kind, currencyCode } },
-    });
-    if (!buyer) {
-      await db.walletAccount.create({
-        data: {
-          userId: buyerId,
-          kind,
-          currencyCode,
-          balance: amount,
-          lockedBalance: new Decimal(0),
-        },
-      });
-      const b = await db.walletAccount.findUniqueOrThrow({
-        where: { userId_kind_currencyCode: { userId: buyerId, kind, currencyCode } },
-      });
-      await db.ledgerEntry.create({
-        data: {
-          accountId: b.id,
-          userId: buyerId,
-          amount,
-          balanceAfter: amount,
-          type: "P2P_RELEASE",
-          referenceType,
-          referenceId,
-        },
-      });
-    } else {
-      const nb = buyer.balance.add(amount);
-      await db.walletAccount.update({
-        where: { id: buyer.id },
-        data: { balance: nb },
-      });
-      await db.ledgerEntry.create({
-        data: {
-          accountId: buyer.id,
-          userId: buyerId,
-          amount,
-          balanceAfter: nb,
-          type: "P2P_RELEASE",
-          referenceType,
-          referenceId,
-        },
-      });
-    }
+    await releaseLockedToBuyerTx(db, sellerId, buyerId, kind, currencyCode, amount, referenceType, referenceId);
+  });
+}
+
+export async function refundLockedToSellerTx(
+  db: Prisma.TransactionClient,
+  sellerId: string,
+  kind: WalletKind,
+  currencyCode: string,
+  amount: Decimal,
+  referenceType: string,
+  referenceId: string,
+): Promise<void> {
+  const seller = await lockWalletRow(db, sellerId, kind, currencyCode);
+  if (!seller || seller.lockedBalance.lessThan(amount)) throw new Error("ESCROW_MISMATCH");
+  const nb = seller.balance.add(amount);
+  await db.walletAccount.update({
+    where: { id: seller.id },
+    data: {
+      balance: nb,
+      lockedBalance: seller.lockedBalance.sub(amount),
+    },
+  });
+  await db.ledgerEntry.create({
+    data: {
+      accountId: seller.id,
+      userId: sellerId,
+      amount,
+      balanceAfter: nb,
+      type: "P2P_REFUND",
+      referenceType,
+      referenceId,
+    },
+  });
+  await db.transaction.create({
+    data: {
+      referenceId: newReference("TX"),
+      userId: sellerId,
+      type: "P2P_REFUND",
+      status: "SUCCESS",
+      amount: amount.abs(),
+      currency: currencyCode,
+      metadata: {
+        ledgerType: "P2P_REFUND",
+        referenceType,
+        referenceId,
+      } as Prisma.InputJsonValue,
+    },
   });
 }
 
@@ -260,29 +400,7 @@ export async function refundLockedToSeller(
   referenceId: string,
 ): Promise<void> {
   await prisma.$transaction(async (db) => {
-    const seller = await db.walletAccount.findUnique({
-      where: { userId_kind_currencyCode: { userId: sellerId, kind, currencyCode } },
-    });
-    if (!seller || seller.lockedBalance.lessThan(amount)) throw new Error("ESCROW_MISMATCH");
-    const nb = seller.balance.add(amount);
-    await db.walletAccount.update({
-      where: { id: seller.id },
-      data: {
-        balance: nb,
-        lockedBalance: seller.lockedBalance.sub(amount),
-      },
-    });
-    await db.ledgerEntry.create({
-      data: {
-        accountId: seller.id,
-        userId: sellerId,
-        amount,
-        balanceAfter: nb,
-        type: "P2P_REFUND",
-        referenceType,
-        referenceId,
-      },
-    });
+    await refundLockedToSellerTx(db, sellerId, kind, currencyCode, amount, referenceType, referenceId);
   });
 }
 

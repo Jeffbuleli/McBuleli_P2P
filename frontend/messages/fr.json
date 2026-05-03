@@ -257,8 +257,11 @@
   },
   "notifications": {
     "title": "Notifications",
-    "subtitle": "Échanges, transferts et sécurité",
-    "empty": "Vous êtes à jour.",
+    "subtitle": "Échanges P2P, séquestre et alertes.",
+    "empty": "Rien pour l’instant — les événements importants apparaîtront ici.",
+    "emptyLive": "Pas encore de notification. Lancez ou acceptez un échange P2P pour voir les mises à jour.",
+    "markRead": "Lu",
+    "markAllRead": "Tout marquer lu",
     "sampleTrade": "Échange · séquestre alimenté",
     "samplePay": "Dépôt reçu · CDF",
     "sampleSecurity": "Nouvelle connexion depuis Chrome Mobile"
@@ -355,12 +358,24 @@
     "chat": "Discussion",
     "messagePlaceholder": "Message à la contrepartie…",
     "status": {
-      "AWAITING_PAYMENT": "En attente du paiement",
+      "PENDING": "En attente du paiement",
       "PAID": "Payé",
-      "COMPLETED": "Terminé",
+      "RELEASED": "Terminé",
       "CANCELLED": "Annulé",
       "DISPUTED": "Litige",
       "EXPIRED": "Expiré"
-    }
+    },
+    "countdown": "Temps restant pour payer",
+    "paymentInstructions": "Instructions de paiement",
+    "offPlatform": "Envoyer le fiat hors plateforme (ex. Mobile Money)",
+    "sendToSeller": "Utilisez les détails ci-dessous pour payer le vendeur",
+    "followOffer": "Coordonnez-vous avec la contrepartie selon l’offre",
+    "noPaymentDetails": "Aucun détail enregistré — utilisez la discussion.",
+    "iHavePaid": "J’ai payé",
+    "openDispute": "Ouvrir un litige",
+    "disputeHint": "En cas de problème ou d’absence de réponse, ouvrez un litige. Le support peut libérer ou rembourser le séquestre.",
+    "disputePlaceholder": "Décrivez le problème (min. 5 caractères)",
+    "disputeSubmit": "Ouvrir le litige",
+    "disputeTooShort": "Ajoutez un peu plus de détail (au moins 5 caractères)."
   }
 }

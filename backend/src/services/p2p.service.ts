@@ -1,10 +1,42 @@
+import { Prisma } from "@prisma/client";
 import { P2POfferSide, WalletKind } from "../constants/schemaEnums.js";
 import { Decimal } from "@prisma/client/runtime/library";
 import { prisma } from "../lib/prisma.js";
-import { moveToLocked, refundLockedToSeller, releaseLockedToBuyer } from "./ledger.service.js";
+import {
+  moveToLockedTx,
+  refundLockedToSellerTx,
+  releaseLockedToBuyerTx,
+} from "./ledger.service.js";
 import { newReference } from "../utils/refs.js";
+import { createNotifications } from "./notification.service.js";
 
-const TRADE_MINUTES = 45;
+/** Payment window before auto-cancel (buyer must mark paid or trade expires). */
+const TRADE_MINUTES = 15;
+
+async function appendActivity(
+  db: Prisma.TransactionClient,
+  tradeId: string,
+  actorId: string | null,
+  action:
+    | "TRADE_CREATED"
+    | "MARKED_PAID"
+    | "RELEASED"
+    | "CANCELLED"
+    | "DISPUTE_OPENED"
+    | "AUTO_EXPIRED"
+    | "DISPUTE_RESOLVED_BUYER"
+    | "DISPUTE_RESOLVED_SELLER",
+  metadata?: Prisma.InputJsonValue,
+) {
+  await db.p2PTradeActivity.create({
+    data: {
+      tradeId,
+      actorId,
+      action,
+      metadata: metadata ?? undefined,
+    },
+  });
+}
 
 export async function createOffer(
   userId: string,
@@ -47,109 +79,210 @@ export async function listOffers(filters: {
       ...(filters.fiat ? { fiatCurrency: filters.fiat as "USD" | "CDF" | "EUR" } : {}),
       ...(filters.crypto ? { cryptoAsset: filters.crypto as "USDT" | "BTC" } : {}),
     },
-    include: { user: { select: { id: true, username: true, p2pRatingAvg: true, completedTrades: true, createdAt: true } } },
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          p2pRatingAvg: true,
+          completedTrades: true,
+          p2pTradesTotal: true,
+          createdAt: true,
+        },
+      },
+    },
     orderBy: { createdAt: "desc" },
     take: 100,
   });
 }
 
-export async function startTrade(
-  offerId: string,
-  takerId: string,
-  fiatAmountStr: string,
-) {
-  const offer = await prisma.p2POffer.findUnique({
-    where: { id: offerId },
-    include: { user: true },
-  });
-  if (!offer || offer.status !== "ACTIVE") throw new Error("OFFER_UNAVAILABLE");
-  if (offer.userId === takerId) throw new Error("SELF_TRADE");
-  const cryptoCode = offer.cryptoAsset === "BTC" ? "BTC" : "USDT";
-  const kind: WalletKind = "CRYPTO";
+export async function startTrade(offerId: string, takerId: string, fiatAmountStr: string) {
+  const trade = await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT id FROM "P2POffer" WHERE id = $1::uuid FOR UPDATE`,
+        offerId,
+      );
 
-  const fiatAmount = new Decimal(fiatAmountStr);
-  if (fiatAmount.lessThan(offer.minFiat) || fiatAmount.greaterThan(offer.maxFiat)) {
-    throw new Error("AMOUNT_OUT_OF_RANGE");
-  }
-  const cryptoAmount = fiatAmount.div(offer.pricePerUnit);
+      const offer = await tx.p2POffer.findUnique({
+        where: { id: offerId },
+        include: { user: true },
+      });
+      if (!offer || offer.status !== "ACTIVE") throw new Error("OFFER_UNAVAILABLE");
+      if (offer.userId === takerId) throw new Error("SELF_TRADE");
+      if (offer.expiresAt && offer.expiresAt < new Date()) throw new Error("OFFER_EXPIRED");
 
-  let buyerId: string;
-  let sellerId: string;
+      const duplicate = await tx.p2PTrade.findFirst({
+        where: {
+          offerId: offer.id,
+          OR: [{ buyerId: takerId }, { sellerId: takerId }],
+          status: { in: ["PENDING", "PAID", "DISPUTED"] },
+        },
+      });
+      if (duplicate) throw new Error("DUPLICATE_ACTIVE_TRADE");
 
-  if (offer.side === "SELL") {
-    sellerId = offer.userId;
-    buyerId = takerId;
-  } else {
-    buyerId = offer.userId;
-    sellerId = takerId;
-  }
+      const cryptoCode = offer.cryptoAsset === "BTC" ? "BTC" : "USDT";
+      const kind: WalletKind = "CRYPTO";
 
-  const ref = newReference("P2P");
-  const ends = new Date(Date.now() + TRADE_MINUTES * 60 * 1000);
+      const fiatAmount = new Decimal(fiatAmountStr);
+      if (fiatAmount.lessThan(offer.minFiat) || fiatAmount.greaterThan(offer.maxFiat)) {
+        throw new Error("AMOUNT_OUT_OF_RANGE");
+      }
+      const cryptoAmount = fiatAmount.div(offer.pricePerUnit);
 
-  await moveToLocked(sellerId, kind, cryptoCode, cryptoAmount, "P2PTrade", ref);
+      let buyerId: string;
+      let sellerId: string;
 
-  const trade = await prisma.p2PTrade.create({
-    data: {
-      referenceId: ref,
-      offerId: offer.id,
-      buyerId,
-      sellerId,
-      cryptoAmount,
-      fiatAmount,
-      status: "AWAITING_PAYMENT",
-      timerEndsAt: ends,
+      if (offer.side === "SELL") {
+        sellerId = offer.userId;
+        buyerId = takerId;
+      } else {
+        buyerId = offer.userId;
+        sellerId = takerId;
+      }
+
+      const ref = newReference("P2P");
+      const ends = new Date(Date.now() + TRADE_MINUTES * 60 * 1000);
+
+      await moveToLockedTx(tx, sellerId, kind, cryptoCode, cryptoAmount, "P2PTrade", ref);
+
+      const created = await tx.p2PTrade.create({
+        data: {
+          referenceId: ref,
+          offerId: offer.id,
+          buyerId,
+          sellerId,
+          cryptoAmount,
+          fiatAmount,
+          status: "PENDING",
+          timerEndsAt: ends,
+        },
+      });
+
+      await appendActivity(tx, created.id, takerId, "TRADE_CREATED", {
+        referenceId: ref,
+        cryptoAmount: cryptoAmount.toString(),
+        fiatAmount: fiatAmount.toString(),
+      });
+
+      return created;
     },
-  });
+    { maxWait: 10_000, timeout: 30_000 },
+  );
+
+  await createNotifications([
+    {
+      userId: trade.buyerId,
+      type: "P2P_TRADE_NEW",
+      title: "New P2P trade",
+      body: `Trade ${trade.referenceId} — send fiat off-platform, then mark paid.`,
+      metadata: { tradeId: trade.id, referenceId: trade.referenceId },
+    },
+    {
+      userId: trade.sellerId,
+      type: "P2P_TRADE_NEW",
+      title: "New P2P trade",
+      body: `Trade ${trade.referenceId} — crypto is in escrow.`,
+      metadata: { tradeId: trade.id, referenceId: trade.referenceId },
+    },
+  ]);
+
   return trade;
 }
 
 export async function markPaid(tradeId: string, actorId: string) {
-  const trade = await prisma.p2PTrade.findUnique({ where: { id: tradeId } });
-  if (!trade) throw new Error("NOT_FOUND");
-  if (trade.buyerId !== actorId) throw new Error("FORBIDDEN");
-  if (trade.status !== "AWAITING_PAYMENT") throw new Error("INVALID_STATE");
-  return prisma.p2PTrade.update({
-    where: { id: tradeId },
-    data: { status: "PAID", paidAt: new Date() },
+  const trade = await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT id FROM "P2PTrade" WHERE id = $1::uuid FOR UPDATE`, tradeId);
+    const row = await tx.p2PTrade.findUnique({ where: { id: tradeId } });
+    if (!row) throw new Error("NOT_FOUND");
+    if (row.buyerId !== actorId) throw new Error("FORBIDDEN");
+    if (row.status !== "PENDING") throw new Error("INVALID_STATE");
+    const updated = await tx.p2PTrade.update({
+      where: { id: tradeId },
+      data: { status: "PAID", paidAt: new Date() },
+    });
+    await appendActivity(tx, tradeId, actorId, "MARKED_PAID", {});
+    return updated;
   });
+
+  await createNotifications([
+    {
+      userId: trade.sellerId,
+      type: "P2P_TRADE_PAID",
+      title: "Buyer marked paid",
+      body: `Trade ${trade.referenceId} — confirm receipt of fiat to release crypto.`,
+      metadata: { tradeId: trade.id, referenceId: trade.referenceId },
+    },
+  ]);
+
+  return trade;
 }
 
 export async function confirmRelease(tradeId: string, actorId: string) {
-  const trade = await prisma.p2PTrade.findUnique({
-    where: { id: tradeId },
-    include: { offer: true },
-  });
-  if (!trade) throw new Error("NOT_FOUND");
-  if (trade.sellerId !== actorId) throw new Error("FORBIDDEN");
-  if (trade.status !== "PAID") throw new Error("INVALID_STATE");
-  const cryptoCode = cryptoCodeForTrade(trade.offer);
-
-  await releaseLockedToBuyer(
-    trade.sellerId,
-    trade.buyerId,
-    "CRYPTO",
-    cryptoCode,
-    trade.cryptoAmount,
-    "P2PTrade",
-    trade.id,
-  );
-
-  await prisma.$transaction([
-    prisma.p2PTrade.update({
+  const done = await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT id FROM "P2PTrade" WHERE id = $1::uuid FOR UPDATE`, tradeId);
+    const trade = await tx.p2PTrade.findUnique({
       where: { id: tradeId },
-      data: { status: "COMPLETED", completedAt: new Date() },
-    }),
-    prisma.user.update({
+      include: { offer: true },
+    });
+    if (!trade) throw new Error("NOT_FOUND");
+    if (trade.sellerId !== actorId) throw new Error("FORBIDDEN");
+    if (trade.status !== "PAID") throw new Error("INVALID_STATE");
+    const cryptoCode = cryptoCodeForTrade(trade.offer);
+
+    await releaseLockedToBuyerTx(
+      tx,
+      trade.sellerId,
+      trade.buyerId,
+      "CRYPTO",
+      cryptoCode,
+      trade.cryptoAmount,
+      "P2PTrade",
+      trade.id,
+    );
+
+    await tx.p2PTrade.update({
+      where: { id: tradeId },
+      data: { status: "RELEASED", completedAt: new Date() },
+    });
+    await appendActivity(tx, tradeId, actorId, "RELEASED", {});
+    await tx.user.update({
       where: { id: trade.buyerId },
-      data: { completedTrades: { increment: 1 } },
-    }),
-    prisma.user.update({
+      data: {
+        completedTrades: { increment: 1 },
+        p2pTradesTotal: { increment: 1 },
+      },
+    });
+    await tx.user.update({
       where: { id: trade.sellerId },
-      data: { completedTrades: { increment: 1 } },
-    }),
+      data: {
+        completedTrades: { increment: 1 },
+        p2pTradesTotal: { increment: 1 },
+      },
+    });
+
+    return tx.p2PTrade.findUnique({ where: { id: tradeId } });
+  });
+
+  const trade = await prisma.p2PTrade.findUniqueOrThrow({ where: { id: tradeId } });
+  await createNotifications([
+    {
+      userId: trade.buyerId,
+      type: "P2P_TRADE_RELEASED",
+      title: "Trade completed",
+      body: `Trade ${trade.referenceId} — crypto released to your wallet.`,
+      metadata: { tradeId: trade.id, referenceId: trade.referenceId },
+    },
+    {
+      userId: trade.sellerId,
+      type: "P2P_TRADE_RELEASED",
+      title: "Trade completed",
+      body: `Trade ${trade.referenceId} — escrow released to buyer.`,
+      metadata: { tradeId: trade.id, referenceId: trade.referenceId },
+    },
   ]);
-  return prisma.p2PTrade.findUnique({ where: { id: tradeId } });
+
+  return done;
 }
 
 function cryptoCodeForTrade(offer: { cryptoAsset: "USDT" | "BTC" }): string {
@@ -157,56 +290,126 @@ function cryptoCodeForTrade(offer: { cryptoAsset: "USDT" | "BTC" }): string {
 }
 
 export async function cancelTrade(tradeId: string, actorId: string) {
-  const trade = await prisma.p2PTrade.findUnique({
-    where: { id: tradeId },
-    include: { offer: true },
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT id FROM "P2PTrade" WHERE id = $1::uuid FOR UPDATE`, tradeId);
+    const trade = await tx.p2PTrade.findUnique({
+      where: { id: tradeId },
+      include: { offer: true },
+    });
+    if (!trade) throw new Error("NOT_FOUND");
+    if (trade.buyerId !== actorId && trade.sellerId !== actorId) throw new Error("FORBIDDEN");
+    if (trade.status === "RELEASED" || trade.status === "CANCELLED") throw new Error("INVALID_STATE");
+    if (trade.status === "PAID" || trade.status === "DISPUTED") {
+      throw new Error("USE_DISPUTE_OR_SUPPORT");
+    }
+    const cryptoCode = cryptoCodeForTrade(trade.offer);
+    await refundLockedToSellerTx(
+      tx,
+      trade.sellerId,
+      "CRYPTO",
+      cryptoCode,
+      trade.cryptoAmount,
+      "P2PTrade",
+      trade.id,
+    );
+
+    await tx.p2PTrade.update({
+      where: { id: tradeId },
+      data: { status: "CANCELLED" },
+    });
+    await appendActivity(tx, tradeId, actorId, "CANCELLED", {});
+    await tx.user.update({
+      where: { id: trade.buyerId },
+      data: { p2pTradesTotal: { increment: 1 } },
+    });
+    await tx.user.update({
+      where: { id: trade.sellerId },
+      data: { p2pTradesTotal: { increment: 1 } },
+    });
+
+    return tx.p2PTrade.findUnique({ where: { id: tradeId } });
   });
-  if (!trade) throw new Error("NOT_FOUND");
-  if (trade.buyerId !== actorId && trade.sellerId !== actorId) throw new Error("FORBIDDEN");
-  if (trade.status === "COMPLETED" || trade.status === "CANCELLED") throw new Error("INVALID_STATE");
-  if (trade.status === "PAID" || trade.status === "DISPUTED") {
-    throw new Error("USE_DISPUTE_OR_SUPPORT");
-  }
-  const cryptoCode = cryptoCodeForTrade(trade.offer);
-  await refundLockedToSeller(
-    trade.sellerId,
-    "CRYPTO",
-    cryptoCode,
-    trade.cryptoAmount,
-    "P2PTrade",
-    trade.id,
-  );
-  return prisma.p2PTrade.update({
-    where: { id: tradeId },
-    data: { status: "CANCELLED" },
-  });
+
+  const trade = await prisma.p2PTrade.findUniqueOrThrow({ where: { id: tradeId } });
+  const peerId = actorId === trade.buyerId ? trade.sellerId : trade.buyerId;
+  await createNotifications([
+    {
+      userId: peerId,
+      type: "P2P_TRADE_CANCELLED",
+      title: "Trade cancelled",
+      body: `Trade ${trade.referenceId} was cancelled; escrow returned to seller.`,
+      metadata: { tradeId: trade.id, referenceId: trade.referenceId },
+    },
+  ]);
+
+  return updated;
 }
 
 export async function autoCancelExpired(tradeId: string) {
-  const trade = await prisma.p2PTrade.findUnique({
-    where: { id: tradeId },
-    include: { offer: true },
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT id FROM "P2PTrade" WHERE id = $1::uuid FOR UPDATE`, tradeId);
+    const trade = await tx.p2PTrade.findUnique({
+      where: { id: tradeId },
+      include: { offer: true },
+    });
+    if (!trade || trade.status !== "PENDING") return null;
+    const cryptoCode = cryptoCodeForTrade(trade.offer);
+    await refundLockedToSellerTx(
+      tx,
+      trade.sellerId,
+      "CRYPTO",
+      cryptoCode,
+      trade.cryptoAmount,
+      "P2PTrade",
+      trade.id,
+    );
+
+    await tx.p2PTrade.update({
+      where: { id: tradeId },
+      data: { status: "CANCELLED" },
+    });
+    await appendActivity(tx, tradeId, null, "AUTO_EXPIRED", {});
+    await tx.user.update({
+      where: { id: trade.buyerId },
+      data: { p2pTradesTotal: { increment: 1 } },
+    });
+    await tx.user.update({
+      where: { id: trade.sellerId },
+      data: { p2pTradesTotal: { increment: 1 } },
+    });
+
+    return trade;
   });
-  if (!trade || trade.status !== "AWAITING_PAYMENT") return null;
-  const cryptoCode = cryptoCodeForTrade(trade.offer);
-  await refundLockedToSeller(
-    trade.sellerId,
-    "CRYPTO",
-    cryptoCode,
-    trade.cryptoAmount,
-    "P2PTrade",
-    trade.id,
-  );
-  return prisma.p2PTrade.update({
-    where: { id: tradeId },
-    data: { status: "CANCELLED" },
-  });
+
+  if (!result) return null;
+
+  await createNotifications([
+    {
+      userId: result.buyerId,
+      type: "P2P_TRADE_CANCELLED",
+      title: "Trade expired",
+      body: `Trade ${result.referenceId} timed out before payment was marked.`,
+      metadata: { tradeId: result.id, referenceId: result.referenceId },
+    },
+    {
+      userId: result.sellerId,
+      type: "P2P_TRADE_CANCELLED",
+      title: "Trade expired",
+      body: `Trade ${result.referenceId} expired; escrow returned.`,
+      metadata: { tradeId: result.id, referenceId: result.referenceId },
+    },
+  ]);
+
+  return prisma.p2PTrade.findUnique({ where: { id: tradeId } });
 }
 
 export async function openDispute(tradeId: string, openerId: string, reason: string) {
   const trade = await prisma.p2PTrade.findUnique({ where: { id: tradeId } });
   if (!trade) throw new Error("NOT_FOUND");
   if (trade.buyerId !== openerId && trade.sellerId !== openerId) throw new Error("FORBIDDEN");
+  if (trade.status === "RELEASED" || trade.status === "CANCELLED") throw new Error("INVALID_STATE");
+  if (trade.status === "DISPUTED") throw new Error("ALREADY_DISPUTED");
+
   await prisma.$transaction([
     prisma.p2PTrade.update({ where: { id: tradeId }, data: { status: "DISPUTED" } }),
     prisma.p2PDispute.create({
@@ -217,7 +420,27 @@ export async function openDispute(tradeId: string, openerId: string, reason: str
         status: "OPEN",
       },
     }),
+    prisma.p2PTradeActivity.create({
+      data: {
+        tradeId,
+        actorId: openerId,
+        action: "DISPUTE_OPENED",
+        metadata: { reason },
+      },
+    }),
   ]);
+
+  const peerId = openerId === trade.buyerId ? trade.sellerId : trade.buyerId;
+  await createNotifications([
+    {
+      userId: peerId,
+      type: "P2P_DISPUTE_OPENED",
+      title: "Dispute opened",
+      body: `Trade ${trade.referenceId} — support will review.`,
+      metadata: { tradeId: trade.id, referenceId: trade.referenceId },
+    },
+  ]);
+
   return prisma.p2PTrade.findUnique({ where: { id: tradeId }, include: { dispute: true } });
 }
 
@@ -237,7 +460,7 @@ export async function listTradeMessages(tradeId: string) {
 
 export async function submitRating(tradeId: string, fromUserId: string, score: number, comment?: string) {
   const trade = await prisma.p2PTrade.findUnique({ where: { id: tradeId } });
-  if (!trade || trade.status !== "COMPLETED") throw new Error("INVALID_TRADE");
+  if (!trade || trade.status !== "RELEASED") throw new Error("INVALID_TRADE");
   const toUserId = trade.buyerId === fromUserId ? trade.sellerId : trade.buyerId;
   await prisma.rating.create({
     data: {
@@ -259,13 +482,13 @@ export async function submitRating(tradeId: string, fromUserId: string, score: n
   });
 }
 
-/** Auto-cancel trades past timer */
+/** Auto-cancel trades past payment timer */
 export async function processExpiredTrades() {
   const now = new Date();
   const expired = await prisma.p2PTrade.findMany({
     where: {
       timerEndsAt: { lt: now },
-      status: "AWAITING_PAYMENT",
+      status: "PENDING",
     },
   });
   for (const t of expired) {
